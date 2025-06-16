@@ -150,7 +150,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 	if err := json.Unmarshal([]byte(event.Payload), &payloadObj); err != nil {
 		return err
 	}
-	mdai.logger.Info("Received static variable payload", zap.Any("Value", payloadObj.Data))
+	mdai.logger.Info("Received static variable payload", zap.Any("Value", payloadObj.Data), zap.String("EventName", event.Name))
 	switch payloadObj.DataType {
 	case "set":
 		values, ok := payloadObj.Data.([]any)
