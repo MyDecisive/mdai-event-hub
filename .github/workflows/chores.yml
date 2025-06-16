@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   ci:
-    uses: decisiveai/ci/.github/workflows/go-lint-test.yml@fac4b525631808bac63173e9c732e741d43fe637
+    uses: decisiveai/ci/.github/workflows/go-lint-test.yml@dj/ENG-595-housekeeping-fix-code-coverage-comments-collection
     secrets:
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       PLATFORM_HEALTH_ACCESS_APP_ID: ${{ secrets.PLATFORM_HEALTH_ACCESS_APP_ID }}
