@@ -166,7 +166,7 @@ func main() {
 	}
 	defer hub.Close()
 
-	configMgr, err := NewConfigMapManager(automationConfigMapNamePostfix)
+	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
