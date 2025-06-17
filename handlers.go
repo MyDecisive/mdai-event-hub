@@ -22,7 +22,7 @@ const (
 var SupportedHandlers = HandlerMap{
 	HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
 	HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
-	HandleNoisyServiceAlert:         handleNoisyServiceList,
+	HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
 }
 
 func processEventPayload(event eventing.MdaiEvent) (map[string]interface{}, error) {
@@ -61,7 +61,7 @@ func getString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func handleNoisyServiceList(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
 	ctx := context.Background()
 	payloadData, err := processEventPayload(event)
 	if err != nil {
