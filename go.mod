@@ -8,7 +8,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.2
 	github.com/decisiveai/mdai-data-core v0.1.7
 	github.com/decisiveai/mdai-operator v0.1.16-0.20250522133829-a3eb3bddb12b
-	github.com/go-logr/zapr v1.3.0
 	github.com/google/uuid v1.6.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/stretchr/testify v1.10.0

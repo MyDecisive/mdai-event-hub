@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -24,7 +23,7 @@ var _ ConfigMapManagerInterface = (*ConfigMapManager)(nil)
 type ConfigMapManager struct {
 	clientset    *kubernetes.Clientset
 	namespace    string
-	logger       *log.Logger
+	logger       *zap.Logger
 	fetchers     map[string]*ConfigMapFetcher
 	fetchersLock sync.RWMutex
 	suffix       string
@@ -36,13 +35,13 @@ type ConfigMapFetcher struct {
 	configMapName string
 	data          map[string]string
 	dataLock      sync.RWMutex
-	logger        *log.Logger
+	logger        *zap.Logger
 	lastUpdated   time.Time
 	ctx           context.Context
 	cancel        context.CancelFunc
 }
 
-func NewConfigMapManager(suffix string) (*ConfigMapManager, error) {
+func NewConfigMapManager(logger *zap.Logger, suffix string) (*ConfigMapManager, error) {
 	// attempting to create inCLuster k8s client first - if fails, tries to create out of cluster client
 	// so can be started locally for dev purposes
 	config, err := rest.InClusterConfig()
@@ -79,7 +78,7 @@ func NewConfigMapManager(suffix string) (*ConfigMapManager, error) {
 	return &ConfigMapManager{
 		clientset: clientset,
 		namespace: namespace,
-		logger:    log.New(os.Stdout, "[ConfigMapManager] ", log.LstdFlags),
+		logger:    logger,
 		fetchers:  make(map[string]*ConfigMapFetcher),
 		suffix:    suffix,
 	}, nil
@@ -94,7 +93,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 	m.fetchersLock.RUnlock()
 
 	if !exists {
-		m.logger.Printf("Creating new fetcher for hub %s (ConfigMap: %s)", hubName, configMapName)
+		m.logger.Info("Creating new fetcher for hub", zap.String("HubName", hubName), zap.String("ConfigMapName", configMapName))
 
 		fetcherCtx, cancel := context.WithCancel(context.Background())
 		fetcher = &ConfigMapFetcher{
@@ -102,7 +101,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 			namespace:     m.namespace,
 			configMapName: configMapName,
 			data:          make(map[string]string),
-			logger:        log.New(os.Stdout, fmt.Sprintf("[ConfigMapFetcher:%s] ", hubName), log.LstdFlags),
+			logger:        m.logger,
 			ctx:           fetcherCtx,
 			cancel:        cancel,
 		}
@@ -115,7 +114,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 
 		err := fetcher.fetchConfigMap(ctx)
 		if err != nil {
-			m.logger.Printf("Warning: Initial fetch for hub %s failed: %v", hubName, err)
+			m.logger.Warn("Warning: Initial fetch for hub failed", zap.String("HubName", hubName), zap.Error(err))
 			// We don't return error here, as the watch might succeed later
 		}
 	}
@@ -129,7 +128,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 		var workflow []v1.AutomationStep
 
 		if err := json.Unmarshal([]byte(v), &workflow); err != nil {
-			m.logger.Printf("could not unmarshall workflow %s: %v", k, err)
+			m.logger.Warn("could not unmarshall workflow", zap.String("key", k), zap.Error(err))
 			continue
 		}
 
@@ -144,7 +143,7 @@ func (m *ConfigMapManager) Cleanup() {
 	defer m.fetchersLock.Unlock()
 
 	for hubName, fetcher := range m.fetchers {
-		m.logger.Printf("Stopping watcher for hub %s", hubName)
+		m.logger.Info("Stopping watcher for hub", zap.String("hubName", hubName))
 		fetcher.cancel()
 	}
 }
@@ -154,7 +153,7 @@ func (m *ConfigMapManager) RemoveHubFetcher(hubName string) {
 	defer m.fetchersLock.Unlock()
 
 	if fetcher, exists := m.fetchers[hubName]; exists {
-		m.logger.Printf("Removing fetcher for hub %s", hubName)
+		m.logger.Info("Removing fetcher for hub", zap.String("hubName", hubName))
 		fetcher.cancel()
 		delete(m.fetchers, hubName)
 	}
@@ -167,20 +166,20 @@ func (f *ConfigMapFetcher) watchConfigMap() {
 	for {
 		select {
 		case <-f.ctx.Done():
-			f.logger.Printf("Watcher for ConfigMap %s stopped", f.configMapName)
+			f.logger.Info("Watcher for ConfigMap stopped", zap.String("configMapName", f.configMapName))
 			return
 		default:
 			// Continue with watch setup
 		}
 
-		f.logger.Printf("Setting up watcher for ConfigMap %s", f.configMapName)
+		f.logger.Info("Setting up watcher for ConfigMap", zap.String("configMapName", f.configMapName))
 		watcher, err := f.clientset.CoreV1().ConfigMaps(f.namespace).Watch(f.ctx, metav1.ListOptions{
 			FieldSelector: fmt.Sprintf("metadata.name=%s", f.configMapName),
 		})
 
 		if err != nil {
-			f.logger.Printf("Failed to watch ConfigMap %s: %v. Retrying in %v...",
-				f.configMapName, err, backoff)
+			f.logger.Error("Failed to watch ConfigMap. Retrying.",
+				zap.String("configMapName", f.configMapName), zap.Error(err), zap.Duration("Retry backoff", backoff))
 
 			select {
 			case <-time.After(backoff):
@@ -196,7 +195,7 @@ func (f *ConfigMapFetcher) watchConfigMap() {
 
 		backoff = 1 * time.Second
 
-		f.logger.Printf("Successfully set up watcher for ConfigMap %s", f.configMapName)
+		f.logger.Info("Successfully set up watcher for ConfigMap", zap.String("configMapName", f.configMapName))
 
 		for event := range watcher.ResultChan() {
 			if f.ctx.Err() != nil {
@@ -208,7 +207,7 @@ func (f *ConfigMapFetcher) watchConfigMap() {
 			case "ADDED", "MODIFIED":
 				configMap, ok := event.Object.(*corev1.ConfigMap)
 				if !ok {
-					f.logger.Printf("Unexpected object type: %T", event.Object)
+					f.logger.Warn("Unexpected object type:", zap.Any("Event Object", event.Object))
 					continue
 				}
 
@@ -217,16 +216,16 @@ func (f *ConfigMapFetcher) watchConfigMap() {
 				f.lastUpdated = time.Now()
 				f.dataLock.Unlock()
 
-				f.logger.Printf("ConfigMap %s was %s, updated with %d entries",
-					f.configMapName, event.Type, len(configMap.Data))
+				f.logger.Info("ConfigMap entries updated",
+					zap.String("configMapName", f.configMapName), zap.String("EventType", string(event.Type)), zap.Int("Entries", len(configMap.Data)))
 
 			case "DELETED":
-				f.logger.Printf("ConfigMap %s was deleted", f.configMapName)
+				f.logger.Info("ConfigMap was deleted", zap.String("ConfigMapName", f.configMapName))
 				// Keep the last known data but mark it as potentially stale
 			}
 		}
 
-		f.logger.Printf("Watcher for ConfigMap %s ended, will reconnect", f.configMapName)
+		f.logger.Info("Watcher for ConfigMap ended, will reconnect", zap.String("ConfigMapName", f.configMapName))
 	}
 }
 
@@ -241,6 +240,6 @@ func (f *ConfigMapFetcher) fetchConfigMap(ctx context.Context) error {
 	f.lastUpdated = time.Now()
 	f.dataLock.Unlock()
 
-	f.logger.Printf("Successfully fetched ConfigMap %s with %d entries", f.configMapName, len(configMap.Data))
+	f.logger.Info("Successfully fetched ConfigMap with entries", zap.String("ConfigMapName", f.configMapName), zap.Int("Entries", len(configMap.Data)))
 	return nil
 }
