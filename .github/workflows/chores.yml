@@ -24,14 +24,14 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    uses: decisiveai/ci/.github/workflows/go-lint.yml@main
+    uses: decisiveai/ci/.github/workflows/go-lint.yml@dj/ENG-595-follow-up
     permissions:
       contents: read
 
   test:
     name: Test
     needs: [lint]
-    uses: decisiveai/ci/.github/workflows/go-test.yml@main
+    uses: decisiveai/ci/.github/workflows/go-test.yml@dj/ENG-595-follow-up
     permissions:
       contents: read
 
@@ -39,7 +39,7 @@ jobs:
     name: PR Coverage
     needs: [test]
     if: github.event_name == 'pull_request'
-    uses: decisiveai/ci/.github/workflows/pr-coverage.yml@main
+    uses: decisiveai/ci/.github/workflows/pr-coverage.yml@dj/ENG-595-follow-up
     permissions:
       contents: read
       actions: read
@@ -49,7 +49,7 @@ jobs:
     name: Publish Coverage
     needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: decisiveai/ci/.github/workflows/go-main-coverage.yml@main
+    uses: decisiveai/ci/.github/workflows/go-main-coverage.yml@dj/ENG-595-follow-up
     secrets:
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       PLATFORM_HEALTH_ACCESS_APP_ID: ${{ secrets.PLATFORM_HEALTH_ACCESS_APP_ID }}
