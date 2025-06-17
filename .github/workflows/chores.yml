@@ -24,14 +24,14 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    uses: decisiveai/ci/.github/workflows/go-lint.yml@dj/ENG-595-follow-up
+    uses: decisiveai/ci/.github/workflows/go-lint.yml@8e2d6901045f1379eec6c24ee38b24d8d37974c1
     permissions:
       contents: read
 
   test:
     name: Test
     needs: [lint]
-    uses: decisiveai/ci/.github/workflows/go-test.yml@dj/ENG-595-follow-up
+    uses: decisiveai/ci/.github/workflows/go-test.yml@8e2d6901045f1379eec6c24ee38b24d8d37974c1
     permissions:
       contents: read
 
@@ -39,7 +39,7 @@ jobs:
     name: PR Coverage
     needs: [test]
     if: github.event_name == 'pull_request'
-    uses: decisiveai/ci/.github/workflows/pr-coverage.yml@dj/ENG-595-follow-up
+    uses: decisiveai/ci/.github/workflows/pr-coverage.yml@8e2d6901045f1379eec6c24ee38b24d8d37974c1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     permissions:
@@ -51,7 +51,7 @@ jobs:
     name: Publish Coverage
     needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: decisiveai/ci/.github/workflows/go-main-coverage.yml@dj/ENG-595-follow-up
+    uses: decisiveai/ci/.github/workflows/go-main-coverage.yml@8e2d6901045f1379eec6c24ee38b24d8d37974c1
     secrets:
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
       PLATFORM_HEALTH_ACCESS_APP_ID: ${{ secrets.PLATFORM_HEALTH_ACCESS_APP_ID }}
