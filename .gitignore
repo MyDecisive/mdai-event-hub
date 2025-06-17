@@ -29,5 +29,5 @@ build
 .secrets
 vendor/
 .idea
-event-handler-webservice
-event-handler-webservice-*.tgz
+./mdai-event-hub
+mdai-event-hub-*.tgz
