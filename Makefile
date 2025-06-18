@@ -1,42 +1,41 @@
 DOCKER_TAG ?= 0.0.1
-LATEST_TAG := $(shell git describe --tags --abbrev=0 $(git rev-parse --abbrev-ref HEAD) | sed 's/^v//')
-CHART_VERSION ?= $(LATEST_TAG)
-CHART_DIR := ./deployment
-CHART_NAME := mdai-event-hub
-CHART_PACKAGE := $(CHART_NAME)-$(CHART_VERSION).tgz
-CHART_REPO := git@github.com:DecisiveAI/mdai-helm-charts.git
-BASE_BRANCH := gh-pages
-TARGET_BRANCH := $(CHART_NAME)-v$(CHART_VERSION)
-CLONE_DIR := $(shell mktemp -d /tmp/mdai-helm-charts.XXXXXX)
-REPO_DIR := $(shell pwd)
+CHART_VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+REPO_NAME := $(shell basename -s .git `git config --get remote.origin.url`)
+
+docker-login docker-build docker-push: AWS_ECR_REPO := public.ecr.aws/p3k6k6h3
+docker-build docker-push: DOCKER_IMAGE := $(AWS_ECR_REPO)/$(REPO_NAME):$(DOCKER_TAG)
 
 .PHONY: docker-login
 docker-login:
-	aws ecr-public get-login-password | docker login --username AWS --password-stdin public.ecr.aws/p3k6k6h3
+	aws ecr-public get-login-password | docker login --username AWS --password-stdin $(AWS_ECR_REPO)
 
 .PHONY: docker-build
 docker-build: tidy vendor
-	docker buildx build --platform linux/arm64,linux/amd64 -t public.ecr.aws/p3k6k6h3/mdai-event-hub:$(DOCKER_TAG) . --load
+	docker buildx build --platform linux/arm64,linux/amd64 -t $(DOCKER_IMAGE) . --load
 
 .PHONY: docker-push
 docker-push: tidy vendor docker-login
-	docker buildx build --platform linux/arm64,linux/amd64 -t public.ecr.aws/p3k6k6h3/mdai-event-hub:$(DOCKER_TAG) . --push
+	docker buildx build --platform linux/arm64,linux/amd64 -t $(DOCKER_IMAGE) . --push
 
 .PHONY: build
 build: tidy vendor
-	CGO_ENABLED=0 go build -mod=vendor -ldflags="-w -s" -o mdai-event-hub .
+	CGO_ENABLED=0 go build -ldflags="-w -s" -o mdai-event-hub .
 
 .PHONY: test
 test: tidy vendor
-	CGO_ENABLED=0 go test -mod=vendor -v -count=1 ./...
+	CGO_ENABLED=0 go test -v -count=1 ./...
 
 .PHONY: tidy
 tidy:
-	go mod tidy
+	@go mod tidy
+
+.PHONY: tidy-check
+tidy-check: tidy
+	@git diff --quiet --exit-code go.mod go.sum || { echo >&2 "go.mod or go.sum is out of sync. Run 'make tidy'."; exit 1; }
 
 .PHONY: vendor
 vendor:
-	go mod vendor
+	@go mod vendor
 
 .PHONY: helm
 helm:
@@ -46,11 +45,19 @@ helm:
 	@echo "  helm-publish   Publish the Helm chart"
 
 .PHONY: helm-package
+helm-package: CHART_DIR := ./deployment
 helm-package:
 	@echo "📦 Packaging Helm chart..."
 	@helm package -u --version $(CHART_VERSION) --app-version $(CHART_VERSION) $(CHART_DIR) > /dev/null
 
 .PHONY: helm-publish
+helm-publish: CHART_NAME := $(REPO_NAME)
+helm-publish: CHART_REPO := git@github.com:DecisiveAI/mdai-helm-charts.git
+helm-publish: CHART_PACKAGE := $(CHART_NAME)-$(CHART_VERSION).tgz
+helm-publish: BASE_BRANCH := gh-pages
+helm-publish: TARGET_BRANCH := $(CHART_NAME)-v$(CHART_VERSION)
+helm-publish: CLONE_DIR := $(shell mktemp -d /tmp/mdai-helm-charts.XXXXXX)
+helm-publish: REPO_DIR := $(shell pwd)
 helm-publish: helm-package
 	@echo "🚀 Cloning $(CHART_REPO)..."
 	@rm -rf $(CLONE_DIR)
