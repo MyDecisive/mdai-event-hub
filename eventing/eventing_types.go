@@ -7,32 +7,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	amqp "github.com/rabbitmq/amqp091-go"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
+type EventHub interface {
+	Connect() error
+	PublishMessage(event MdaiEvent) error
+	StartListening(invoker HandlerInvoker) error
+	ListenUntilSignal(invoker HandlerInvoker) error
+	Close()
+}
+
+var _ EventHub = (*RmqBackend)(nil)
+
 // HandlerInvoker is a function type that processes MdaiEvents
 type HandlerInvoker func(event MdaiEvent) error
-
-// EventHub represents a connection to RabbitMQ
-type EventHub struct {
-	conn          *amqp.Connection
-	ch            *amqp.Channel
-	queueName     string
-	mu            sync.Mutex
-	isListening   bool
-	shutdown      chan struct{}
-	processingWg  sync.WaitGroup
-	logger        *zap.Logger
-	connCloseChan chan *amqp.Error
-}
-
-func (h *EventHub) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("queue_name", h.queueName)
-	enc.AddBool("is_listening", h.isListening)
-	return nil
-}
 
 // MdaiEvent represents an event in the system
 type MdaiEvent struct {

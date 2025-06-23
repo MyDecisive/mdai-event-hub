@@ -162,7 +162,7 @@ func main() {
 
 	hub, err := initEventHub(ctx, logger)
 	if err != nil {
-		logger.Fatal("Failed to create EventHub", zap.Error(err))
+		logger.Fatal("Failed to create RmqBackend", zap.Error(err))
 	}
 	defer hub.Close()
 
@@ -204,7 +204,7 @@ func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, e
 	)
 }
 
-func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHubInterface, error) {
+func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHub, error) {
 	rmqEndpoint := getEnvVariableWithDefault(rabbitmqEndpointEnvVarKey, "")
 	rmqPassword := getEnvVariableWithDefault(rabbitmqPasswordEnvVarKey, "")
 
@@ -212,8 +212,12 @@ func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHubInt
 		zap.String("endpoint", rmqEndpoint),
 		zap.String("queue", eventing.EventQueueName))
 
-	initializer := func() (eventing.EventHubInterface, error) {
-		return eventing.NewEventHub("amqp://mdai:"+rmqPassword+"@"+rmqEndpoint+"/", eventing.EventQueueName, logger)
+	initializer := func() (eventing.EventHub, error) {
+		hub := eventing.NewEventHub("amqp://mdai:"+rmqPassword+"@"+rmqEndpoint+"/", eventing.EventQueueName, logger)
+		if err := hub.Connect(); err != nil {
+			return nil, err
+		}
+		return hub, nil
 	}
 
 	return RetryInitializer(

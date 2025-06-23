@@ -1,12 +1,14 @@
 package eventing
 
 type MockEventHub struct {
+	ConnectFunc           func() error
 	PublishMessageFunc    func(event MdaiEvent) error
 	StartListeningFunc    func(invoker HandlerInvoker) error
 	ListenUntilSignalFunc func(invoker HandlerInvoker) error
 	CloseFunc             func()
 
 	// Track calls for verification
+	Connected               bool
 	PublishedEvents         []MdaiEvent
 	ListeningStarted        bool
 	ListenUntilSignalCalled bool
@@ -15,12 +17,18 @@ type MockEventHub struct {
 
 func NewMockEventHub() *MockEventHub {
 	return &MockEventHub{
+		ConnectFunc:           func() error { return nil },
 		PublishMessageFunc:    func(event MdaiEvent) error { return nil },
 		StartListeningFunc:    func(invoker HandlerInvoker) error { return nil },
 		ListenUntilSignalFunc: func(invoker HandlerInvoker) error { return nil },
 		CloseFunc:             func() {},
 		PublishedEvents:       make([]MdaiEvent, 0),
 	}
+}
+
+func (m *MockEventHub) Connect() error {
+	m.Connected = true
+	return m.ConnectFunc()
 }
 
 func (m *MockEventHub) PublishMessage(event MdaiEvent) error {
@@ -43,7 +51,10 @@ func (m *MockEventHub) Close() {
 	m.CloseFunc()
 }
 
-// Helper methods for assertions
+func (m *MockEventHub) WasConnected() bool {
+	return m.Connected
+}
+
 func (m *MockEventHub) GetPublishedEvents() []MdaiEvent {
 	return m.PublishedEvents
 }
@@ -62,6 +73,7 @@ func (m *MockEventHub) WasClosed() bool {
 
 func (m *MockEventHub) Reset() {
 	m.PublishedEvents = make([]MdaiEvent, 0)
+	m.Connected = false
 	m.ListeningStarted = false
 	m.ListenUntilSignalCalled = false
 	m.Closed = false
