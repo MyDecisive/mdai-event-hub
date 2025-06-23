@@ -25,7 +25,7 @@ var SupportedHandlers = HandlerMap{
 	HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
 }
 
-func processEventPayload(event eventing.MdaiEvent) (map[string]interface{}, error) {
+func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	if event.Payload == "" {
 		return map[string]any{}, nil
 	}
@@ -184,7 +184,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 			switch payloadObj.Operation {
 			case "add":
 				{
-					values, ok := payloadObj.Data.(map[string]interface{})
+					values, ok := payloadObj.Data.(map[string]any)
 					if !ok {
 						return fmt.Errorf("data should be a map[string]string")
 					}
@@ -197,7 +197,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				}
 			case "remove":
 				{
-					values, ok := payloadObj.Data.([]interface{})
+					values, ok := payloadObj.Data.([]any)
 					if !ok {
 						return fmt.Errorf("data should be a slice of strings")
 					}

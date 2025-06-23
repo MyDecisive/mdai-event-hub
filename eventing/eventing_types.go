@@ -2,6 +2,7 @@ package eventing
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ type MdaiEvent struct {
 	HubName       string    `json:"hubName"`
 }
 
-func (mdaiEvent MdaiEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+func (mdaiEvent *MdaiEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("name", mdaiEvent.Name)
 	enc.AddString("id", mdaiEvent.Id)
 	enc.AddString("source", mdaiEvent.Source)
@@ -64,17 +65,19 @@ func (mdaiEvent *MdaiEvent) ApplyDefaults() {
 	}
 }
 
-func (mdaiEvent MdaiEvent) Validate() error {
+var errMissingRequiredFields = errors.New("missing required field")
+
+func (mdaiEvent *MdaiEvent) Validate() error {
 	if mdaiEvent.Name == "" {
-		return errors.New("missing required field: name")
+		return fmt.Errorf("%w: %s", errMissingRequiredFields, "name")
 	}
 
 	if mdaiEvent.HubName == "" {
-		return errors.New("missing required field: name")
+		return fmt.Errorf("%w: %s", errMissingRequiredFields, "hubName")
 	}
 
 	if mdaiEvent.Payload == "" {
-		return errors.New("missing required field: name")
+		return fmt.Errorf("%w: %s", errMissingRequiredFields, "payload")
 	}
 	return nil
 }
