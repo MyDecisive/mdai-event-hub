@@ -3,7 +3,6 @@ package eventing
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
