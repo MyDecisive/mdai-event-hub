@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewRmqBackend(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	connectionString := "amqp://guest:guest@localhost:5672/"
 	queueName := "test-queue"
 
@@ -25,7 +25,7 @@ func TestNewRmqBackend(t *testing.T) {
 }
 
 func TestRmqBackend_Connect_InvalidConnectionString(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "invalid-connection-string",
 		queueName:        "test-queue",
@@ -38,7 +38,7 @@ func TestRmqBackend_Connect_InvalidConnectionString(t *testing.T) {
 }
 
 func TestRmqBackend_PublishMessage_NoConnection(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "amqp://localhost:5672/",
 		queueName:        "test-queue",
@@ -58,7 +58,7 @@ func TestRmqBackend_PublishMessage_NoConnection(t *testing.T) {
 }
 
 func TestRmqBackend_StartListening_NoConnection(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "amqp://localhost:5672/",
 		queueName:        "test-queue",
@@ -75,7 +75,7 @@ func TestRmqBackend_StartListening_NoConnection(t *testing.T) {
 }
 
 func TestRmqBackend_Close_SafeToCallMultipleTimes(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "amqp://localhost:5672/",
 		queueName:        "test-queue",
@@ -87,7 +87,7 @@ func TestRmqBackend_Close_SafeToCallMultipleTimes(t *testing.T) {
 }
 
 func TestRmqBackend_MarshalLogObject(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "amqp://localhost:5672/",
 		queueName:        "test-queue",
@@ -100,7 +100,7 @@ func TestRmqBackend_MarshalLogObject(t *testing.T) {
 }
 
 func TestRmqBackend_StartListening_AlreadyListening(t *testing.T) {
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	backend := &RmqBackend{
 		connectionString: "amqp://localhost:5672/",
 		queueName:        "test-queue",
@@ -113,5 +113,5 @@ func TestRmqBackend_StartListening_AlreadyListening(t *testing.T) {
 	}
 
 	err := backend.StartListening(invoker)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
