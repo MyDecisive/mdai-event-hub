@@ -34,7 +34,7 @@ func TestRmqBackend_Connect_InvalidConnectionString(t *testing.T) {
 
 	err := backend.Connect()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to dial")
+	assert.ErrorContains(t, err, "failed to dial")
 }
 
 func TestRmqBackend_PublishMessage_NoConnection(t *testing.T) {
@@ -54,7 +54,7 @@ func TestRmqBackend_PublishMessage_NoConnection(t *testing.T) {
 
 	err := backend.PublishMessage(event)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "connection is closed")
+	assert.ErrorContains(t, err, "connection is closed")
 }
 
 func TestRmqBackend_StartListening_NoConnection(t *testing.T) {
@@ -71,7 +71,7 @@ func TestRmqBackend_StartListening_NoConnection(t *testing.T) {
 
 	err := backend.StartListening(invoker)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "connection is closed")
+	assert.ErrorContains(t, err, "connection is closed")
 }
 
 func TestRmqBackend_Close_SafeToCallMultipleTimes(t *testing.T) {
