@@ -1,0 +1,12 @@
+deployment/
+LICENSE
+Makefile
+*.md
+vendor/
+mdai-event-hub
+mdai-event-hub*.tgz
+.git
+.gitignore
+coverage.out
+.dockerignore
+Dockerfile
