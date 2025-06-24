@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 	"time"
 
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
@@ -22,9 +24,6 @@ var (
 )
 
 const (
-	rabbitmqEndpointEnvVarKey = "RABBITMQ_ENDPOINT"
-	rabbitmqPasswordEnvVarKey = "RABBITMQ_PASSWORD"
-
 	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
 	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
 
@@ -150,8 +149,8 @@ func getEnvVariableWithDefault(key, defaultValue string) string {
 }
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Initialize ValKeyClient with retry logic
 	valkeyClient, err := initValKeyClient(ctx, logger)
@@ -160,7 +159,7 @@ func main() {
 	}
 	defer valkeyClient.Close()
 
-	hub, err := initEventHub(ctx, logger)
+	hub, err := initNatsEventHub()
 	if err != nil {
 		logger.Fatal("Failed to create EventHub", zap.Error(err))
 	}
@@ -172,12 +171,12 @@ func main() {
 	}
 	defer configMgr.Cleanup()
 
-	// Start listening and block until termination signal
-	err = hub.ListenUntilSignal(ProcessEvent(ctx, valkeyClient, configMgr, logger))
+	err = hub.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger))
 	if err != nil {
 		logger.Fatal("Failed to start event listener", zap.Error(err))
 	}
 
+	<-ctx.Done()
 	logger.Info("Service shutting down")
 }
 
@@ -204,24 +203,6 @@ func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, e
 	)
 }
 
-func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHubInterface, error) {
-	rmqEndpoint := getEnvVariableWithDefault(rabbitmqEndpointEnvVarKey, "")
-	rmqPassword := getEnvVariableWithDefault(rabbitmqPasswordEnvVarKey, "")
-
-	logger.Info("Connecting to RabbitMQ",
-		zap.String("endpoint", rmqEndpoint),
-		zap.String("queue", eventing.EventQueueName))
-
-	initializer := func() (eventing.EventHubInterface, error) {
-		return eventing.NewEventHub("amqp://mdai:"+rmqPassword+"@"+rmqEndpoint+"/", eventing.EventQueueName, logger)
-	}
-
-	return RetryInitializer(
-		ctx,
-		logger,
-		"event hub",
-		initializer,
-		3*time.Minute,
-		5*time.Second,
-	)
+func initNatsEventHub() (*eventing.EventBus, error) {
+	return eventing.New(eventing.Config{})
 }
