@@ -1,6 +1,7 @@
 package eventing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -9,15 +10,17 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type EventHub interface {
-	Connect() error
-	PublishMessage(event MdaiEvent) error
-	StartListening(invoker HandlerInvoker) error
-	ListenUntilSignal(invoker HandlerInvoker) error
-	Close()
+const ManualVariablesEventSource = "manual_variables_api"
+
+type Publisher interface {
+	Publish(MdaiEvent) error
+	Close() error
 }
 
-var _ EventHub = (*RmqBackend)(nil)
+type Subscriber interface {
+	Subscribe(context.Context, HandlerInvoker) error
+	Close() error
+}
 
 // HandlerInvoker is a function type that processes MdaiEvents
 type HandlerInvoker func(event MdaiEvent) error

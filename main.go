@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 	"time"
 
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
 	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/decisiveai/mdai-event-hub/eventing/nats"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 
 	"os"
@@ -22,9 +25,6 @@ var (
 )
 
 const (
-	rabbitmqEndpointEnvVarKey = "RABBITMQ_ENDPOINT"
-	rabbitmqPasswordEnvVarKey = "RABBITMQ_PASSWORD"
-
 	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
 	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
 
@@ -150,8 +150,8 @@ func getEnvVariableWithDefault(key, defaultValue string) string {
 }
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Initialize ValKeyClient with retry logic
 	valkeyClient, err := initValKeyClient(ctx, logger)
@@ -160,11 +160,11 @@ func main() {
 	}
 	defer valkeyClient.Close()
 
-	hub, err := initEventHub(ctx, logger)
+	subscriber, err := initNatsSubscriber()
 	if err != nil {
-		logger.Fatal("Failed to create RmqBackend", zap.Error(err))
+		logger.Fatal("Failed to create subscriber", zap.Error(err))
 	}
-	defer hub.Close()
+	defer subscriber.Close()
 
 	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
 	if err != nil {
@@ -172,12 +172,12 @@ func main() {
 	}
 	defer configMgr.Cleanup()
 
-	// Start listening and block until termination signal
-	err = hub.ListenUntilSignal(ProcessEvent(ctx, valkeyClient, configMgr, logger))
+	err = subscriber.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger))
 	if err != nil {
 		logger.Fatal("Failed to start event listener", zap.Error(err))
 	}
 
+	<-ctx.Done()
 	logger.Info("Service shutting down")
 }
 
@@ -204,28 +204,6 @@ func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, e
 	)
 }
 
-func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHub, error) {
-	rmqEndpoint := getEnvVariableWithDefault(rabbitmqEndpointEnvVarKey, "")
-	rmqPassword := getEnvVariableWithDefault(rabbitmqPasswordEnvVarKey, "")
-
-	logger.Info("Connecting to RabbitMQ",
-		zap.String("endpoint", rmqEndpoint),
-		zap.String("queue", eventing.EventQueueName))
-
-	initializer := func() (eventing.EventHub, error) {
-		hub := eventing.NewEventHub("amqp://mdai:"+rmqPassword+"@"+rmqEndpoint+"/", eventing.EventQueueName, logger)
-		if err := hub.Connect(); err != nil {
-			return nil, err
-		}
-		return hub, nil
-	}
-
-	return RetryInitializer(
-		ctx,
-		logger,
-		"event hub",
-		initializer,
-		3*time.Minute,
-		5*time.Second,
-	)
+func initNatsSubscriber() (eventing.Subscriber, error) {
+	return nats.NewSubscriber(nats.Config{ClientName: "subscriber-event-hub", Logger: logger})
 }
