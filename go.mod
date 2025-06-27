@@ -12,6 +12,7 @@ require (
 	github.com/nats-io/nats.go v1.43.0
 	github.com/nats-io/nuid v1.0.1
 	github.com/stretchr/testify v1.10.0
+	github.com/synadia-io/orbit.go/pcgroups v0.1.0
 	github.com/valkey-io/valkey-go v1.0.57
 	github.com/valkey-io/valkey-go/mock v1.0.57
 	go.uber.org/mock v0.5.2

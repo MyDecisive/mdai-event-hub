@@ -5,126 +5,138 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/synadia-io/orbit.go/pcgroups"
 	"go.uber.org/zap"
 )
 
 const dlqSuffix = ".dlq"
 
 type EventSubscriber struct {
-	cfg           Config
-	logger        *zap.Logger
-	conn          *nats.Conn
-	streamContext nats.JetStreamContext
-	subscription  *nats.Subscription
-	waitGroup     sync.WaitGroup
-	closeCh       chan struct{}
-	closeOnce     sync.Once
+	cfg       Config
+	logger    *zap.Logger
+	conn      *nats.Conn
+	jetStream jetstream.JetStream
+	waitGroup sync.WaitGroup
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func NewSubscriber(cfg Config) (*EventSubscriber, error) {
 	applyDefaults(&cfg)
 
-	conn, js, err := connect(cfg)
-	if err != nil {
-		return nil, err
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Fail fast if stream is absent.
-	if _, err := js.StreamInfo(cfg.StreamName); err != nil {
-		_ = conn.Drain()
-		return nil, fmt.Errorf("stream %q not found: %w", cfg.StreamName, err)
+	conn, js, err := connect(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
 	return &EventSubscriber{
-		cfg:           cfg,
-		logger:        cfg.Logger,
-		conn:          conn,
-		streamContext: js,
-		closeCh:       make(chan struct{}),
+		cfg:       cfg,
+		logger:    cfg.Logger,
+		conn:      conn,
+		jetStream: js,
+		closeCh:   make(chan struct{}),
 	}, nil
 }
 
 func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.HandlerInvoker) error {
-	pattern := s.cfg.Subject + ".>"
 	dlqSubject := s.cfg.Subject + dlqSuffix
+	handler := func(msg jetstream.Msg) {
+		s.waitGroup.Add(1)
+		defer s.waitGroup.Done()
 
-	subscriber, err := s.streamContext.QueueSubscribe(
-		pattern,
-		s.cfg.QueueName,
-		func(msg *nats.Msg) {
-			s.waitGroup.Add(1)
-			defer s.waitGroup.Done()
+		if metadata, _ := msg.Metadata(); metadata != nil {
+			s.logger.Debug("delivery attempt",
+				zap.Uint64("consumer_seq", metadata.Sequence.Consumer),
+				zap.Uint64("stream_seq", metadata.Sequence.Stream))
+		}
 
-			metadata, _ := msg.Metadata() // temporary to debug order
-			if metadata != nil {
-				s.logger.Debug("delivery attempt",
-					zap.Uint64("consumer_seq", metadata.Sequence.Consumer),
-					zap.Uint64("stream_seq", metadata.Sequence.Stream))
+		forwardToDLQ := func(reason string, err error) bool {
+			// copy headers so we don’t mutate the in-flight message
+			header := nats.Header{}
+			for k, vv := range msg.Headers() {
+				header[k] = append([]string(nil), vv...)
+			}
+			header.Set("dlq_reason", reason)
+			header.Set("dlq_error", err.Error())
+
+			dlq := &nats.Msg{
+				Subject: dlqSubject,
+				Data:    msg.Data(),
+				Header:  header,
 			}
 
-			forwardToDLQ := func(reason string, err error) bool {
-				// copy headers so we don’t mutate the in-flight message
-				header := nats.Header{}
-				for k, vv := range msg.Header {
-					header[k] = append([]string(nil), vv...)
-				}
-				header.Set("dlq_reason", reason)
-				header.Set("dlq_error", err.Error())
+			ctxDLQ, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, pubErr := s.jetStream.PublishMsg(ctxDLQ, dlq); pubErr != nil {
+				s.logger.Error("publish DLQ failed", zap.Error(pubErr))
+				return false
+			}
 
-				dlq := &nats.Msg{
-					Subject: dlqSubject,
-					Data:    msg.Data,
-					Header:  header,
-				}
+			s.logger.Warn("sent message to DLQ",
+				zap.String("dlq_subject", dlqSubject),
+				zap.String("reason", reason),
+				zap.Int("bytes", len(msg.Data())))
+			return true
+		}
 
-				if _, pubErr := s.streamContext.PublishMsg(dlq); pubErr != nil {
-					s.logger.Error("publish DLQ failed", zap.Error(pubErr))
-					_ = msg.Nak() // retry the original later
-					return false
-				}
-
-				s.logger.Warn("sent message to DLQ",
-					zap.String("dlq_subject", dlqSubject),
-					zap.String("reason", reason),
-					zap.Int("bytes", len(msg.Data)))
+		var event eventing.MdaiEvent
+		if err := json.Unmarshal(msg.Data(), &event); err != nil {
+			s.logger.Error("unmarshal", zap.Error(err))
+			if forwardToDLQ("json_unmarshal_error", err) {
 				_ = msg.Ack()
-				return true
+			} else {
+				_ = msg.Nak()
 			}
+			return
+		}
 
-			var event eventing.MdaiEvent
-			if err := json.Unmarshal(msg.Data, &event); err != nil {
-				s.logger.Error("unmarshal", zap.Error(err))
-				forwardToDLQ("json_unmarshal_error", err)
-				return
+		if err := invoker(event); err != nil {
+			s.logger.Error("handler", zap.Error(err))
+			if forwardToDLQ("handler_error", err) {
+				_ = msg.Ack()
+			} else {
+				_ = msg.Nak()
 			}
-
-			if err := invoker(event); err != nil {
-				s.logger.Error("handler", zap.Error(err))
-				forwardToDLQ("handler_error", err)
-				return
-			}
-			_ = msg.Ack()
-		},
-		nats.ManualAck(),
-		nats.Durable(s.cfg.DurableName),
-		nats.AckWait(defaultAckWait),
-		nats.MaxAckPending(defaultMaxAckPending),
-	)
-	if err != nil {
-		return err
+			return
+		}
+		_ = msg.Ack()
 	}
-	s.subscription = subscriber
 
-	// Shutdown listener
+	consumerConfig := jetstream.ConsumerConfig{
+		AckWait:       defaultAckWait,
+		MaxAckPending: defaultMaxAckPending,
+		Durable:       s.cfg.DurableName,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	}
+
+	memberID := "m1"
+	if _, err := pcgroups.ElasticConsume(
+		ctx,
+		s.jetStream,
+		s.cfg.StreamName,
+		"hubMetricCG",
+		memberID,
+		handler,
+		consumerConfig,
+	); err != nil {
+		return fmt.Errorf("consume: %w", err)
+	}
+
 	go func() {
 		select {
 		case <-ctx.Done():
 		case <-s.closeCh:
 		}
-		_ = s.subscription.Drain()
+		//_ = s.subscription.Drain()
+		s.logger.Info("shutting down subscriber")
 		s.waitGroup.Wait()
 	}()
 

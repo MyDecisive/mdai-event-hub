@@ -9,11 +9,13 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/synadia-io/orbit.go/pcgroups"
 	"go.uber.org/zap"
 )
 
 const (
-	natsPasswordEnvVar = "NATS_PASS"
+	natsPasswordEnvVar = "NATS_PASS" // TODO add user and password to connect opts
 
 	defaultSubject       = "events"
 	defaultStreamName    = "EVENTS_STREAM"
@@ -78,16 +80,18 @@ func safeToken(s string) string {
 	return strings.NewReplacer(".", "_", " ", "_").Replace(s)
 }
 
-func subjectFromEvent(prefix string, e eventing.MdaiEvent) string {
+func subjectFromEvent(prefix string, event eventing.MdaiEvent) string {
+	//part := hashKey(event.HubName, event.Name /*metric*/, 16) // 16 partitions FIXME
 	return strings.Join([]string{
 		prefix,
-		safeToken(e.HubName),
-		safeToken(e.Source),
-		safeToken(e.Name),
+		safeToken(event.HubName),
+		safeToken(event.Source),
+		safeToken(event.Name),
+		//strconv.FormatUint(uint64(part), 10),
 	}, ".")
 }
 
-func connect(cfg Config) (*nats.Conn, nats.JetStreamContext, error) {
+func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, error) {
 	natsOpts := []nats.Option{
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(-1),
@@ -110,7 +114,7 @@ func connect(cfg Config) (*nats.Conn, nats.JetStreamContext, error) {
 		return nats.Connect(cfg.URL, natsOpts...)
 	}
 
-	conn, err := backoff.Retry(context.Background(), operation)
+	conn, err := backoff.Retry(ctx, operation)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -125,11 +129,45 @@ func connect(cfg Config) (*nats.Conn, nats.JetStreamContext, error) {
 		time.Sleep(5 * time.Second)
 	}
 
-	js, err := conn.JetStream()
+	js, err := jetstream.New(conn) // implements pcgroups’ JetStream interface
 	if err != nil {
+		cfg.Logger.Error("NATS JetStream setup failed", zap.Error(err))
 		_ = conn.Drain()
 		return nil, nil, err
 	}
 
+	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, js, cfg.StreamName, "hubMetricCG")
+	if err != nil {
+		cfg.Logger.Error("NATS Elastic Consumer Group setup failed", zap.Error(err))
+	}
+	if ec == nil {
+		_, err = pcgroups.CreateElastic(
+			ctx,
+			js,
+			cfg.StreamName,
+			"hubMetricCG",
+			10,
+			"events.*.*.*",
+			[]int{1, 3},
+			1024,
+			1024,
+		)
+		if err != nil {
+			cfg.Logger.Error("NATS Elastic Consumer Group creation failed", zap.Error(err))
+		}
+	}
+
+	_, err = pcgroups.AddMembers(
+		ctx,
+		js,
+		cfg.StreamName,
+		"hubMetricCG",
+		[]string{"m1", "m2", "m3"},
+	)
+	if err != nil {
+		cfg.Logger.Error("NATS Elastic Consumer Group member addition failed", zap.Error(err))
+	}
+
+	cfg.Logger.Info("NATS setup completed")
 	return conn, js, nil
 }
