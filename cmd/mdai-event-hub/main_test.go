@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	config "github.com/decisiveai/mdai-event-hub/pkg/configMap"
+	configmapmgr "github.com/decisiveai/mdai-event-hub/pkg/configmap"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 	"github.com/stretchr/testify/assert"
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	valkeyMock "github.com/valkey-io/valkey-go/mock"
+	valkeymock "github.com/valkey-io/valkey-go/mock"
 )
 
 // Mock handler for testing
@@ -31,9 +31,9 @@ func TestProcessEvent_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := config.NewMockConfigMapManager()
+	mockConfigMgr := configmapmgr.NewManagerMock()
 
 	testHandlerCalled = false
 	testHandlerError = nil
@@ -73,9 +73,9 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := config.NewMockConfigMapManager()
+	mockConfigMgr := configmapmgr.NewManagerMock()
 
 	event := eventing.MdaiEvent{
 		Name: "TestAlert.firing",
@@ -94,9 +94,9 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := config.NewMockConfigMapManager()
+	mockConfigMgr := configmapmgr.NewManagerMock()
 
 	testHandlerCalled = false
 	testHandlerError = nil
@@ -135,9 +135,9 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := config.NewMockConfigMapManager()
+	mockConfigMgr := configmapmgr.NewManagerMock()
 
 	mockConfigMgr.SetConfig("test-hub", map[string][]v1.AutomationStep{})
 
@@ -214,8 +214,8 @@ func TestSafePerformAutomationStep_PanicRecovery(t *testing.T) {
 
 	logger := zap.NewNop()
 	mdai := handlers.MdaiInterface{
-		Data:   nil,
-		Logger: logger,
+		Logger:         logger,
+		HandlerAdapter: nil,
 	}
 
 	autoStep := v1.AutomationStep{

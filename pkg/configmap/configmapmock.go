@@ -1,17 +1,17 @@
-package configMap
+package configmap
 
 import (
 	"context"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 )
 
-type ConfigMapManagerInterface interface {
+type ManagerInterface interface {
 	GetConfigMapForHub(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error)
 	Cleanup()
 	RemoveHubFetcher(hubName string)
 }
 
-type MockConfigMapManager struct {
+type ManagerMock struct {
 	GetConfigMapForHubFunc func(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error)
 	CleanupFunc            func()
 	RemoveHubFetcherFunc   func(hubName string)
@@ -24,8 +24,8 @@ type MockConfigMapManager struct {
 	configMapMockData map[string]map[string][]v1.AutomationStep
 }
 
-func NewMockConfigMapManager() *MockConfigMapManager {
-	return &MockConfigMapManager{
+func NewManagerMock() *ManagerMock {
+	return &ManagerMock{
 		GetConfigMapForHubFunc: func(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error) {
 			return make(map[string][]v1.AutomationStep), nil
 		},
@@ -37,7 +37,7 @@ func NewMockConfigMapManager() *MockConfigMapManager {
 	}
 }
 
-func (m *MockConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error) {
+func (m *ManagerMock) GetConfigMapForHub(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error) {
 	m.GetConfigMapCalls = append(m.GetConfigMapCalls, hubName)
 
 	if data, exists := m.configMapMockData[hubName]; exists {
@@ -47,22 +47,22 @@ func (m *MockConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName s
 	return m.GetConfigMapForHubFunc(ctx, hubName)
 }
 
-func (m *MockConfigMapManager) Cleanup() {
+func (m *ManagerMock) Cleanup() {
 	m.CleanupCalled = true
 	m.CleanupFunc()
 }
 
-func (m *MockConfigMapManager) RemoveHubFetcher(hubName string) {
+func (m *ManagerMock) RemoveHubFetcher(hubName string) {
 	m.RemovedHubFetchers = append(m.RemovedHubFetchers, hubName)
 	m.RemoveHubFetcherFunc(hubName)
 }
 
-func (m *MockConfigMapManager) SetConfig(hubName string, workflowMap map[string][]v1.AutomationStep) {
+func (m *ManagerMock) SetConfig(hubName string, workflowMap map[string][]v1.AutomationStep) {
 	m.configMapMockData[hubName] = workflowMap
 }
 
 // Helper methods assertions
-func (m *MockConfigMapManager) GetConfigMapCallsForHub(hubName string) int {
+func (m *ManagerMock) GetConfigMapCallsForHub(hubName string) int {
 	count := 0
 	for _, call := range m.GetConfigMapCalls {
 		if call == hubName {
@@ -72,15 +72,15 @@ func (m *MockConfigMapManager) GetConfigMapCallsForHub(hubName string) int {
 	return count
 }
 
-func (m *MockConfigMapManager) WasCleanupCalled() bool {
+func (m *ManagerMock) WasCleanupCalled() bool {
 	return m.CleanupCalled
 }
 
-func (m *MockConfigMapManager) GetRemovedHubFetchers() []string {
+func (m *ManagerMock) GetRemovedHubFetchers() []string {
 	return m.RemovedHubFetchers
 }
 
-func (m *MockConfigMapManager) Reset() {
+func (m *ManagerMock) Reset() {
 	m.GetConfigMapCalls = make([]string, 0)
 	m.CleanupCalled = false
 	m.RemovedHubFetchers = make([]string, 0)

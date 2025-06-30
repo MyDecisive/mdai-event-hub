@@ -1,4 +1,4 @@
-package configMap
+package configmap
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-var _ ConfigMapManagerInterface = (*Manager)(nil)
+var _ ManagerInterface = (*Manager)(nil)
 
 type Manager struct {
 	clientset    *kubernetes.Clientset
@@ -41,7 +41,7 @@ type Fetcher struct {
 	cancel        context.CancelFunc
 }
 
-func NewConfigMapManager(logger *zap.Logger, suffix string) (*Manager, error) {
+func New(logger *zap.Logger, suffix string) (*Manager, error) {
 	// attempting to create inCLuster k8s client first - if fails, tries to create out of cluster client
 	// so can be started locally for dev purposes
 	config, err := rest.InClusterConfig()

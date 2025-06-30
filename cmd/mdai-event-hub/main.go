@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
-	eventHub "github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	valkeyWrapper "github.com/decisiveai/mdai-event-hub/internal/valkey"
-	configMapMgr "github.com/decisiveai/mdai-event-hub/pkg/configMap"
+	valkeywrapper "github.com/decisiveai/mdai-event-hub/internal/valkey"
+	configmapmgr "github.com/decisiveai/mdai-event-hub/pkg/configmap"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 
@@ -46,12 +46,12 @@ func init() {
 }
 
 // ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr configMapMgr.ConfigMapManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr configmapmgr.ManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := handlers.MdaiInterface{
-		Data:   dataAdapter,
-		Logger: logger,
+		Logger:         logger,
+		HandlerAdapter: dataAdapter,
 	}
 
 	return func(event eventing.MdaiEvent) error {
@@ -115,7 +115,7 @@ func safePerformAutomationStep(mdai handlers.MdaiInterface, autoStep v1.Automati
 	// handle panics
 	defer func() {
 		if r := recover(); r != nil {
-			mdai.Logger.Error(
+			mdai.Error(
 				"Panic inside automation handler",
 				zap.Any("panicValue", r),
 				zap.String("handlerRef", autoStep.HandlerRef),
@@ -143,19 +143,19 @@ func main() {
 	defer cancel()
 
 	// Initialize ValKeyClient with retry logic
-	valkeyClient, err := valkeyWrapper.Init(ctx, logger)
+	valkeyClient, err := valkeywrapper.Init(ctx, logger)
 	if err != nil {
 		logger.Fatal("failed to get valkey client", zap.Error(err))
 	}
 	defer valkeyClient.Close()
 
-	hub, err := eventHub.Init(ctx, logger)
+	hub, err := eventhub.Init(ctx, logger)
 	if err != nil {
 		logger.Fatal("Failed to create RmqBackend", zap.Error(err))
 	}
 	defer hub.Close()
 
-	configMgr, err := configMapMgr.NewConfigMapManager(logger, automationConfigMapNamePostfix)
+	configMgr, err := configmapmgr.New(logger, automationConfigMapNamePostfix)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
