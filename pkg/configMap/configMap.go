@@ -1,4 +1,4 @@
-package main
+package configMap
 
 import (
 	"context"
@@ -18,18 +18,18 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-var _ ConfigMapManagerInterface = (*ConfigMapManager)(nil)
+var _ ConfigMapManagerInterface = (*Manager)(nil)
 
-type ConfigMapManager struct {
+type Manager struct {
 	clientset    *kubernetes.Clientset
 	namespace    string
 	logger       *zap.Logger
-	fetchers     map[string]*ConfigMapFetcher
+	fetchers     map[string]*Fetcher
 	fetchersLock sync.RWMutex
 	suffix       string
 }
 
-type ConfigMapFetcher struct {
+type Fetcher struct {
 	clientset     *kubernetes.Clientset
 	namespace     string
 	configMapName string
@@ -41,7 +41,7 @@ type ConfigMapFetcher struct {
 	cancel        context.CancelFunc
 }
 
-func NewConfigMapManager(logger *zap.Logger, suffix string) (*ConfigMapManager, error) {
+func NewConfigMapManager(logger *zap.Logger, suffix string) (*Manager, error) {
 	// attempting to create inCLuster k8s client first - if fails, tries to create out of cluster client
 	// so can be started locally for dev purposes
 	config, err := rest.InClusterConfig()
@@ -75,17 +75,17 @@ func NewConfigMapManager(logger *zap.Logger, suffix string) (*ConfigMapManager, 
 		}
 	}
 
-	return &ConfigMapManager{
+	return &Manager{
 		clientset: clientset,
 		namespace: namespace,
 		logger:    logger,
-		fetchers:  make(map[string]*ConfigMapFetcher),
+		fetchers:  make(map[string]*Fetcher),
 		suffix:    suffix,
 	}, nil
 }
 
-// GetConfigMapForHub returns the ConfigMap data for a specific hub, creating a new ConfigMapManager if one is not found
-func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error) {
+// GetConfigMapForHub returns the ConfigMap data for a specific hub, creating a new Manager if one is not found
+func (m *Manager) GetConfigMapForHub(ctx context.Context, hubName string) (map[string][]v1.AutomationStep, error) {
 	configMapName := hubName + m.suffix
 
 	m.fetchersLock.RLock()
@@ -96,7 +96,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 		m.logger.Info("Creating new fetcher for hub", zap.String("HubName", hubName), zap.String("ConfigMapName", configMapName))
 
 		fetcherCtx, cancel := context.WithCancel(context.Background())
-		fetcher = &ConfigMapFetcher{
+		fetcher = &Fetcher{
 			clientset:     m.clientset,
 			namespace:     m.namespace,
 			configMapName: configMapName,
@@ -138,7 +138,7 @@ func (m *ConfigMapManager) GetConfigMapForHub(ctx context.Context, hubName strin
 	return result, nil
 }
 
-func (m *ConfigMapManager) Cleanup() {
+func (m *Manager) Cleanup() {
 	m.fetchersLock.Lock()
 	defer m.fetchersLock.Unlock()
 
@@ -148,7 +148,7 @@ func (m *ConfigMapManager) Cleanup() {
 	}
 }
 
-func (m *ConfigMapManager) RemoveHubFetcher(hubName string) {
+func (m *Manager) RemoveHubFetcher(hubName string) {
 	m.fetchersLock.Lock()
 	defer m.fetchersLock.Unlock()
 
@@ -159,7 +159,7 @@ func (m *ConfigMapManager) RemoveHubFetcher(hubName string) {
 	}
 }
 
-func (f *ConfigMapFetcher) watchConfigMap() {
+func (f *Fetcher) watchConfigMap() {
 	backoff := 1 * time.Second
 	maxBackoff := 60 * time.Second
 
@@ -229,7 +229,7 @@ func (f *ConfigMapFetcher) watchConfigMap() {
 	}
 }
 
-func (f *ConfigMapFetcher) fetchConfigMap(ctx context.Context) error {
+func (f *Fetcher) fetchConfigMap(ctx context.Context) error {
 	configMap, err := f.clientset.CoreV1().ConfigMaps(f.namespace).Get(ctx, f.configMapName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get ConfigMap %s: %v", f.configMapName, err)

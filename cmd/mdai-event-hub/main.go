@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
-
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
-	"github.com/decisiveai/mdai-event-hub/eventing"
+	eventHub "github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	valkeyWrapper "github.com/decisiveai/mdai-event-hub/internal/valkey"
+	configMapMgr "github.com/decisiveai/mdai-event-hub/pkg/configMap"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 
 	"os"
@@ -22,12 +24,6 @@ var (
 )
 
 const (
-	rabbitmqEndpointEnvVarKey = "RABBITMQ_ENDPOINT"
-	rabbitmqPasswordEnvVarKey = "RABBITMQ_PASSWORD"
-
-	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
-	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
-
 	automationConfigMapNamePostfix = "-automation"
 )
 
@@ -45,17 +41,17 @@ func init() {
 
 	logger = zap.New(core, zap.AddCaller())
 	// don't really care about failing of defer that is the last thing run before the program exists
-	//nolint:all
+	// nolint:all
 	defer logger.Sync() // Flush logs before exiting
 }
 
 // ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMapManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr configMapMgr.ConfigMapManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
-	mdaiInterface := MdaiInterface{
-		data:   dataAdapter,
-		logger: logger,
+	mdaiInterface := handlers.MdaiInterface{
+		Data:   dataAdapter,
+		Logger: logger,
 	}
 
 	return func(event eventing.MdaiEvent) error {
@@ -69,7 +65,7 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 		)
 
 		if event.Source == eventing.ManualVariablesEventSource {
-			err := handleManualVariablesActions(ctx, mdaiInterface, event)
+			err := handlers.HandleManualVariablesActions(ctx, mdaiInterface, event)
 			if err != nil {
 				return err
 			}
@@ -115,11 +111,11 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 	}
 }
 
-func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, event eventing.MdaiEvent) (err error) {
+func safePerformAutomationStep(mdai handlers.MdaiInterface, autoStep v1.AutomationStep, event eventing.MdaiEvent) (err error) {
 	// handle panics
 	defer func() {
 		if r := recover(); r != nil {
-			mdai.logger.Error(
+			mdai.Logger.Error(
 				"Panic inside automation handler",
 				zap.Any("panicValue", r),
 				zap.String("handlerRef", autoStep.HandlerRef),
@@ -130,9 +126,9 @@ func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, e
 		}
 	}()
 
-	handlerName := HandlerName(autoStep.HandlerRef)
+	handlerName := handlers.HandlerName(autoStep.HandlerRef)
 
-	if handlerFn, exists := SupportedHandlers[handlerName]; exists {
+	if handlerFn, exists := handlers.SupportedHandlers[handlerName]; exists {
 		// TODO add event audit here
 		if err := handlerFn(mdai, event, autoStep.Arguments); err != nil {
 			return fmt.Errorf("handler %s failed: %w", handlerName, err)
@@ -142,31 +138,24 @@ func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, e
 	return fmt.Errorf("handler %s not supported", handlerName)
 }
 
-func getEnvVariableWithDefault(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
-}
-
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Initialize ValKeyClient with retry logic
-	valkeyClient, err := initValKeyClient(ctx, logger)
+	valkeyClient, err := valkeyWrapper.Init(ctx, logger)
 	if err != nil {
 		logger.Fatal("failed to get valkey client", zap.Error(err))
 	}
 	defer valkeyClient.Close()
 
-	hub, err := initEventHub(ctx, logger)
+	hub, err := eventHub.Init(ctx, logger)
 	if err != nil {
 		logger.Fatal("Failed to create RmqBackend", zap.Error(err))
 	}
 	defer hub.Close()
 
-	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
+	configMgr, err := configMapMgr.NewConfigMapManager(logger, automationConfigMapNamePostfix)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
@@ -179,53 +168,4 @@ func main() {
 	}
 
 	logger.Info("Service shutting down")
-}
-
-func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
-	valKeyEndpoint := getEnvVariableWithDefault(valkeyEndpointEnvVarKey, "")
-	valkeyPassword := getEnvVariableWithDefault(valkeyPasswordEnvVarKey, "")
-
-	logger.Info(fmt.Sprintf("Initializing valkey client with endpoint %s", valKeyEndpoint))
-
-	initializer := func() (valkey.Client, error) {
-		return valkey.NewClient(valkey.ClientOption{
-			InitAddress: []string{valKeyEndpoint},
-			Password:    valkeyPassword,
-		})
-	}
-
-	return RetryInitializer(
-		ctx,
-		logger,
-		"valkey client",
-		initializer,
-		3*time.Minute,
-		5*time.Second,
-	)
-}
-
-func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHub, error) {
-	rmqEndpoint := getEnvVariableWithDefault(rabbitmqEndpointEnvVarKey, "")
-	rmqPassword := getEnvVariableWithDefault(rabbitmqPasswordEnvVarKey, "")
-
-	logger.Info("Connecting to RabbitMQ",
-		zap.String("endpoint", rmqEndpoint),
-		zap.String("queue", eventing.EventQueueName))
-
-	initializer := func() (eventing.EventHub, error) {
-		hub := eventing.NewEventHub("amqp://mdai:"+rmqPassword+"@"+rmqEndpoint+"/", eventing.EventQueueName, logger)
-		if err := hub.Connect(); err != nil {
-			return nil, err
-		}
-		return hub, nil
-	}
-
-	return RetryInitializer(
-		ctx,
-		logger,
-		"event hub",
-		initializer,
-		3*time.Minute,
-		5*time.Second,
-	)
 }
