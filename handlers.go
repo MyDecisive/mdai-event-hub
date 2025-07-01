@@ -233,9 +233,10 @@ type SlackPayload struct {
 }
 
 func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
-	//webhookURL := "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-	//message := "Hello from Go!"
 	webhookURL := args["webhook_url"]
+	if webhookURL == "" {
+		return fmt.Errorf("webhook_url is a required arg value, cannot call webhook")
+	}
 
 	payloadData, err := processEventPayload(event)
 	mdai.logger.Info("WEBHOOK PAYLOAD", zap.Any("payload", payloadData), zap.Any("args", args))
