@@ -1,18 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"go.uber.org/zap"
+	"net/http"
 )
 
 const (
 	HandleAddNoisyServiceToSet      HandlerName = "HandleAddNoisyServiceToSet"
 	HandleRemoveNoisyServiceFromSet HandlerName = "HandleRemoveNoisyServiceFromSet"
 	HandleNoisyServiceAlert         HandlerName = "HandleNoisyServiceAlert"
+	HandleCallWebhook               HandlerName = "HandleCallWebhook"
 )
 
 // SupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
@@ -23,6 +25,7 @@ var SupportedHandlers = HandlerMap{
 	HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
 	HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
 	HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
+	HandleCallWebhook:               HandleCallWebhookFn,
 }
 
 func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
@@ -222,5 +225,58 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 			}
 		}
 	}
+	return nil
+}
+
+type SlackPayload struct {
+	Text string `json:"text"`
+}
+
+func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+	//webhookURL := "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+	//message := "Hello from Go!"
+	webhookURL := args["webhook_url"]
+
+	payloadData, err := processEventPayload(event)
+	mdai.logger.Info("WEBHOOK PAYLOAD", zap.Any("payload", payloadData), zap.Any("args", args))
+	if err != nil {
+		return fmt.Errorf("failed to process payload: %w", err)
+	}
+
+	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
+	payloadValue, err := getString(payloadData, payloadValueKey)
+	if err != nil {
+		return fmt.Errorf("failed to get payload value key: %w", err)
+	}
+
+	payload := SlackPayload{
+		Text: fmt.Sprintf("Service %s exceeded X error rate over Y minutes compared to the last ZTIME", payloadValue),
+	}
+
+	// Marshal the payload into JSON.
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	// Create an HTTP POST request.
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use the default HTTP client.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Slack expects a 200 OK response.
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("non-200 response: %s", resp.Status)
+	}
+
 	return nil
 }
