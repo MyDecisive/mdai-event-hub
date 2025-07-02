@@ -17,27 +17,29 @@ import (
 const (
 	natsPasswordEnvVar = "NATS_PASS" // TODO add user and password to connect opts
 
-	defaultSubject       = "events"
-	defaultStreamName    = "EVENTS_STREAM"
-	defaultQueueName     = "events"
-	defaultDurableName   = "events_durable"
-	defaultClientName    = "mdai-event"
-	defaultURL           = "nats://nats.default.svc.cluster.local:4222"
-	defaultAckWait       = 30 * time.Second
-	defaultMaxAckPending = 1
-	defaultDuplicates    = 2 * time.Minute
-	connectTimeout       = 2 * time.Second
-	reconnectWait        = 2 * time.Second
+	defaultSubject           = "events"
+	defaultStreamName        = "EVENTS_STREAM"
+	defaultQueueName         = "events"
+	defaultDurableName       = "events_durable"
+	defaultClientName        = "mdai-event"
+	defaultURL               = "nats://nats.default.svc.cluster.local:4222"
+	defaultAckWait           = 30 * time.Second
+	defaultMaxAckPending     = 1
+	defaultDuplicates        = 2 * time.Minute
+	connectTimeout           = 2 * time.Second
+	reconnectWait            = 2 * time.Second
+	defaultInactiveThreshold = 1 * time.Minute
 )
 
 type Config struct {
-	URL         string
-	Subject     string
-	StreamName  string
-	QueueName   string
-	DurableName string
-	ClientName  string
-	Logger      *zap.Logger
+	URL               string
+	Subject           string
+	StreamName        string
+	QueueName         string
+	DurableName       string
+	ClientName        string
+	InactiveThreshold time.Duration
+	Logger            *zap.Logger
 }
 
 func applyDefaults(c *Config) {
@@ -58,6 +60,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.ClientName == "" {
 		c.ClientName = defaultClientName
+	}
+	if c.InactiveThreshold == 0 {
+		c.InactiveThreshold = defaultInactiveThreshold
 	}
 	if c.Logger == nil {
 		l, _ := zap.NewProduction()
@@ -81,13 +86,11 @@ func safeToken(s string) string {
 }
 
 func subjectFromEvent(prefix string, event eventing.MdaiEvent) string {
-	//part := hashKey(event.HubName, event.Name /*metric*/, 16) // 16 partitions FIXME
 	return strings.Join([]string{
 		prefix,
 		safeToken(event.HubName),
 		safeToken(event.Source),
 		safeToken(event.Name),
-		//strconv.FormatUint(uint64(part), 10),
 	}, ".")
 }
 
@@ -159,8 +162,9 @@ func getMemberIDs() string {
 		}
 	}, raw)
 
-	if len(clean) > 16 {
-		clean = clean[len(clean)-16:]
+	const maxLen = 16
+	if len(clean) > maxLen {
+		clean = clean[len(clean)-maxLen:]
 	}
 	return clean
 }

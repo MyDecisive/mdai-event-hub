@@ -37,10 +37,6 @@ func NewSubscriber(cfg Config) (*EventSubscriber, error) {
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
-	//if err := addElasticConsumersGroupMember(ctx, js, cfg.StreamName); err != nil {
-	//	return nil, fmt.Errorf("add Elastic Consumer Group member: %w", err)
-	//}
-
 	return &EventSubscriber{
 		cfg:       cfg,
 		logger:    cfg.Logger,
@@ -119,7 +115,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		MaxAckPending: defaultMaxAckPending,
 		//Durable:       s.cfg.DurableName,
 		AckPolicy:         jetstream.AckExplicitPolicy,
-		InactiveThreshold: 1 * time.Minute,
+		InactiveThreshold: s.cfg.InactiveThreshold,
 	}
 
 	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, eventing.ConsumerGroupName)
@@ -170,6 +166,20 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 func (s *EventSubscriber) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
+		memberID := getMemberIDs()
+		dropped, dropErr := pcgroups.DeleteMembers(
+			context.Background(),
+			s.jetStream,
+			s.cfg.StreamName,
+			eventing.ConsumerGroupName,
+			[]string{memberID},
+		)
+		if dropErr != nil {
+			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.Strings("dropped", dropped))
+		} else {
+			s.logger.Info("deregistered from elastic group", zap.Strings("dropped", dropped))
+		}
+
 		close(s.closeCh)
 		if s.conn != nil && !s.conn.IsClosed() {
 			err = s.conn.Drain()
