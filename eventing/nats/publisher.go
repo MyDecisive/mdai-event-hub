@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"time"
 
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
+	"github.com/synadia-io/orbit.go/pcgroups"
 	"go.uber.org/zap"
 )
 
@@ -51,13 +51,16 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent) 
 		event.Timestamp = time.Now().UTC()
 	}
 
+	subject := subjectFromEvent(p.cfg.Subject, event)
+	p.logger.Info("Publishing event to subject", zap.String("subject", subject), zap.Any("event", event))
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
 
 	msg := &nats.Msg{
-		Subject: subjectFromEvent(p.cfg.Subject, event),
+		Subject: subject,
 		Data:    data,
 		Header: nats.Header{
 			"name":        []string{event.Name},
@@ -70,7 +73,8 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent) 
 		msg.Header.Set("correlationId", event.CorrelationId)
 	}
 
-	_, err = p.js.PublishMsg(ctx, msg)
+	pubAck, err := p.js.PublishMsg(ctx, msg)
+	p.logger.Info("Published message", zap.Any("pubAck", pubAck))
 	return err
 }
 
@@ -92,16 +96,32 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 				Retention:  jetstream.WorkQueuePolicy, // assume no replay needed
 				MaxMsgs:    -1,
 				MaxBytes:   -1,
-				Discard:    jetstream.DiscardNew,
+				Discard:    jetstream.DiscardOld,
 				Duplicates: defaultDuplicates,
 			})
 	}
-	return err
-}
 
-func hashKey(hub, metric string, P uint32) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(hub))
-	_, _ = h.Write([]byte(metric))
-	return h.Sum32() % P
+	ec, _ := pcgroups.GetElasticConsumerGroupConfig(ctx, js, cfg.StreamName, eventing.ConsumerGroupName)
+	if ec == nil {
+		_, err = pcgroups.CreateElastic(
+			ctx,
+			js,
+			cfg.StreamName,
+			eventing.ConsumerGroupName,
+			10, // works for 1-3 replicas, TODO make it configurable: partitions = replicas * 3  (rounded to something tidy, e.g. 10, 12, 16)
+			"events.*.*.*",
+			[]int{1, 3}, // TODO should we change to []int{1,2,3}?
+			-1,
+			-1,
+		)
+		if err != nil {
+			cfg.Logger.Error("NATS Elastic Consumer Group creation failed", zap.Error(err))
+		}
+		cfg.Logger.Info("NATS Elastic Consumer Group created")
+	}
+
+	if errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
+		return nil // someone else just created it
+	}
+	return err
 }

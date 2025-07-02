@@ -37,6 +37,10 @@ func NewSubscriber(cfg Config) (*EventSubscriber, error) {
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
+	//if err := addElasticConsumersGroupMember(ctx, js, cfg.StreamName); err != nil {
+	//	return nil, fmt.Errorf("add Elastic Consumer Group member: %w", err)
+	//}
+
 	return &EventSubscriber{
 		cfg:       cfg,
 		logger:    cfg.Logger,
@@ -53,7 +57,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		defer s.waitGroup.Done()
 
 		if metadata, _ := msg.Metadata(); metadata != nil {
-			s.logger.Debug("delivery attempt",
+			s.logger.Info("delivery attempt",
 				zap.Uint64("consumer_seq", metadata.Sequence.Consumer),
 				zap.Uint64("stream_seq", metadata.Sequence.Stream))
 		}
@@ -113,16 +117,36 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 	consumerConfig := jetstream.ConsumerConfig{
 		AckWait:       defaultAckWait,
 		MaxAckPending: defaultMaxAckPending,
-		Durable:       s.cfg.DurableName,
-		AckPolicy:     jetstream.AckExplicitPolicy,
+		//Durable:       s.cfg.DurableName,
+		AckPolicy:         jetstream.AckExplicitPolicy,
+		InactiveThreshold: 1 * time.Minute,
 	}
 
-	memberID := "m1"
+	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, eventing.ConsumerGroupName)
+	if err != nil {
+		return fmt.Errorf("get Elastic Consumer Group config: %w", err)
+	}
+
+	memberID := getMemberIDs()
+	if !ec.IsInMembership(memberID) {
+		members, err := pcgroups.AddMembers(
+			ctx,
+			s.jetStream,
+			s.cfg.StreamName,
+			eventing.ConsumerGroupName,
+			[]string{memberID},
+		)
+		if err != nil {
+			return err
+		}
+		s.logger.Info("Subscribing with member ID", zap.String("memberID", memberID), zap.Any("members", members))
+	}
+
 	if _, err := pcgroups.ElasticConsume(
 		ctx,
 		s.jetStream,
 		s.cfg.StreamName,
-		"hubMetricCG",
+		eventing.ConsumerGroupName,
 		memberID,
 		handler,
 		consumerConfig,

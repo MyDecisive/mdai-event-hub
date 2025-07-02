@@ -10,7 +10,7 @@ import (
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/synadia-io/orbit.go/pcgroups"
+	"github.com/nats-io/nuid"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +22,7 @@ const (
 	defaultQueueName     = "events"
 	defaultDurableName   = "events_durable"
 	defaultClientName    = "mdai-event"
-	defaultURL           = "nats://nats:4222"
+	defaultURL           = "nats://nats.default.svc.cluster.local:4222"
 	defaultAckWait       = 30 * time.Second
 	defaultMaxAckPending = 1
 	defaultDuplicates    = 2 * time.Minute
@@ -136,38 +136,40 @@ func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, 
 		return nil, nil, err
 	}
 
-	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, js, cfg.StreamName, "hubMetricCG")
-	if err != nil {
-		cfg.Logger.Error("NATS Elastic Consumer Group setup failed", zap.Error(err))
-	}
-	if ec == nil {
-		_, err = pcgroups.CreateElastic(
-			ctx,
-			js,
-			cfg.StreamName,
-			"hubMetricCG",
-			10,
-			"events.*.*.*",
-			[]int{1, 3},
-			1024,
-			1024,
-		)
-		if err != nil {
-			cfg.Logger.Error("NATS Elastic Consumer Group creation failed", zap.Error(err))
-		}
-	}
-
-	_, err = pcgroups.AddMembers(
-		ctx,
-		js,
-		cfg.StreamName,
-		"hubMetricCG",
-		[]string{"m1", "m2", "m3"},
-	)
-	if err != nil {
-		cfg.Logger.Error("NATS Elastic Consumer Group member addition failed", zap.Error(err))
-	}
-
 	cfg.Logger.Info("NATS setup completed")
 	return conn, js, nil
+}
+
+func getMemberIDs() string {
+	raw := firstNonEmpty(
+		os.Getenv("POD_NAME"),
+		os.Getenv("HOSTNAME"),
+		nuid.Next(), // fallback for local testing
+	)
+	// Valid priority group name must match A-Z, a-z, 0-9, -_/=)+ and may not exceed 16 characters
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-', r == '_', r == '/', r == '=':
+			return r
+		default:
+			return '_'
+		}
+	}, raw)
+
+	if len(clean) > 16 {
+		clean = clean[len(clean)-16:]
+	}
+	return clean
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

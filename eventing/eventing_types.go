@@ -10,7 +10,10 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const ManualVariablesEventSource = "manual_variables_api"
+const (
+	ConsumerGroupName          = "consumer-group"
+	ManualVariablesEventSource = "manual_variables_api"
+)
 
 type Publisher interface {
 	Publish(MdaiEvent) error

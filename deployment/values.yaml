@@ -10,7 +10,7 @@ serviceAccount:
 deployment:
   namespace: mdai
   name: mdai-event-hub
-  replicas: 1
+  replicas: 3
   containerPort: 8082
 image:
   repository: public.ecr.aws/p3k6k6h3/mdai-event-hub
@@ -19,7 +19,6 @@ image:
 service:
   namespace: mdai
   name: mdai-event-hub
-  replicas: 1
   port: 8082
   targetPort: 8082
   type: ClusterIP
