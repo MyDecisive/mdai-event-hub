@@ -14,7 +14,7 @@ const (
 	HandleAddNoisyServiceToSet      HandlerName = "HandleAddNoisyServiceToSet"
 	HandleRemoveNoisyServiceFromSet HandlerName = "HandleRemoveNoisyServiceFromSet"
 	HandleNoisyServiceAlert         HandlerName = "HandleNoisyServiceAlert"
-	HandleCallWebhook               HandlerName = "HandleCallWebhook"
+	HandleCallSlackWebhook          HandlerName = "HandleCallSlackWebhook"
 )
 
 // SupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
@@ -25,7 +25,7 @@ var SupportedHandlers = HandlerMap{
 	HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
 	HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
 	HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
-	HandleCallWebhook:               HandleCallWebhookFn,
+	HandleCallSlackWebhook:          HandleCallSlackWebhookFn,
 }
 
 func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
@@ -233,14 +233,13 @@ type SlackPayload struct {
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
 	webhookURL := args["webhook_url"]
 	if webhookURL == "" {
 		return fmt.Errorf("webhook_url is a required arg value, cannot call webhook")
 	}
 
 	payloadData, err := processEventPayload(event)
-	mdai.logger.Info("WEBHOOK PAYLOAD", zap.Any("payload", payloadData), zap.Any("args", args))
 	if err != nil {
 		return fmt.Errorf("failed to process payload: %w", err)
 	}
@@ -267,7 +266,7 @@ func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[
 	fields := []map[string]string{
 		{
 			"type": "mrkdwn",
-			"text": fmt.Sprintf("*%s* - %s", "Alert timestamp (UTC)", event.Timestamp),
+			"text": fmt.Sprintf("*%s* - %s", "Alert timestamp", event.Timestamp),
 		},
 	}
 	payloadValuePrimaryKey := args["payload_val_ref_primary"]
