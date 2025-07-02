@@ -229,7 +229,8 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 }
 
 type SlackPayload struct {
-	Text string `json:"text"`
+	Text   string           `json:"text"`
+	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
 func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
@@ -244,14 +245,92 @@ func HandleCallWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[
 		return fmt.Errorf("failed to process payload: %w", err)
 	}
 
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
-	payloadValue, err := getString(payloadData, payloadValueKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload value key: %w", err)
+	message := args["message"]
+	if message == "" {
+		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
+	} else {
+		message = fmt.Sprintf("*%s*", message)
+	}
+	payload := SlackPayload{
+		Text: message,
+		Blocks: []map[string]any{
+			{
+				"type": "section",
+				"text": map[string]string{
+					"type": "mrkdwn",
+					"text": fmt.Sprintf("*%s*", message),
+				},
+			},
+		},
 	}
 
-	payload := SlackPayload{
-		Text: fmt.Sprintf("Service %s exceeded X error rate over Y minutes compared to the last ZTIME", payloadValue),
+	fields := []map[string]string{
+		{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", "Alert timestamp (UTC)", event.Timestamp),
+		},
+	}
+	payloadValuePrimaryKey := args["payload_val_ref_primary"]
+	if payloadValuePrimaryKey != "" {
+		payloadValuePrimary, err := getString(payloadData, payloadValuePrimaryKey)
+		if err != nil {
+			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValuePrimaryKey, payloadValuePrimary),
+		})
+	}
+	payloadValueSecondaryKey := args["payload_val_ref_secondary"]
+	if payloadValueSecondaryKey != "" {
+		payloadValueSecondary, err := getString(payloadData, payloadValueSecondaryKey)
+		if err != nil {
+			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValueSecondaryKey, payloadValueSecondary),
+		})
+	}
+	payloadValueTertiaryKey := args["payload_val_ref_tertiary"]
+	if payloadValueTertiaryKey != "" {
+		payloadValueTertiary, err := getString(payloadData, payloadValueTertiaryKey)
+		if err != nil {
+			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValueTertiaryKey, payloadValueTertiary),
+		})
+	}
+
+	if len(fields) > 0 {
+		payload.Blocks = append(payload.Blocks, map[string]any{
+			"type":   "section",
+			"fields": fields,
+		})
+	}
+
+	linkText := args["link_text"]
+	linkUrl := args["link_url"]
+	if linkUrl != "" {
+		if linkText == "" {
+			linkText = "See more"
+		}
+		payload.Blocks = append(payload.Blocks, map[string]any{
+			"type": "actions",
+			"elements": []map[string]any{
+				{
+					"type": "button",
+					"text": map[string]string{
+						"type": "plain_text",
+						"text": linkText,
+					},
+					"style": "primary",
+					"url":   linkUrl,
+				},
+			},
+		})
 	}
 
 	// Marshal the payload into JSON.
