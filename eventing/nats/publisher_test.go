@@ -311,7 +311,9 @@ func TestSingleActiveMember(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}))
-	_ = sub.Close()
+	defer func(sub *EventSubscriber) {
+		_ = sub.Close()
+	}(sub)
 
 	// Publish events for two keys
 	keys := []string{"KeyA", "KeyB"}
