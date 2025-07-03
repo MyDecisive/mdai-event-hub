@@ -26,8 +26,14 @@ type EventSubscriber struct {
 	closeOnce sync.Once
 }
 
-func NewSubscriber(cfg Config) (*EventSubscriber, error) {
-	applyDefaults(&cfg)
+func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.Logger = logger
+	cfg.ClientName = clientName
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

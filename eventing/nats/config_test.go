@@ -1,11 +1,17 @@
 package nats
 
 import (
+	"context"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestSafeToken(t *testing.T) {
@@ -41,14 +47,42 @@ func TestFirstNonEmpty(t *testing.T) {
 	assert.Equal(t, "", firstNonEmpty("", "", ""))
 }
 
-func TestApplyDefaults(t *testing.T) {
-	cfg := Config{}
-	applyDefaults(&cfg)
-	assert.Equal(t, defaultURL, cfg.URL)
-	assert.Equal(t, defaultSubject, cfg.Subject)
-	assert.Equal(t, defaultStreamName, cfg.StreamName)
-	assert.Equal(t, defaultQueueName, cfg.QueueName)
-	assert.Equal(t, defaultDurableName, cfg.DurableName)
-	assert.Equal(t, defaultClientName, cfg.ClientName)
-	assert.NotNil(t, cfg.Logger)
+// Delay server startup to force initial connect failures
+func TestConnectRetriesUntilServerAvailable(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err, "failed to pick a free port")
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+
+	logger, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+
+	url := fmt.Sprintf("nats://127.0.0.1:%d", port)
+	cfg := Config{
+		URL:        url,
+		ClientName: "test-retry",
+		Logger:     logger,
+	}
+
+	// Delay server startup to force initial connect failures
+	go func() {
+		time.Sleep(3 * time.Second)
+		opts := &server.Options{JetStream: true, Port: port}
+		srv, err := server.NewServer(opts)
+		assert.NoError(t, err, "failed to create embedded NATS server")
+		go srv.Start()
+		assert.True(t, srv.ReadyForConnections(5*time.Second), "embedded server did not start in time")
+	}()
+
+	// Attempt to connect with retries
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	conn, js, err := connect(ctx, cfg)
+	assert.NoError(t, err, "Connect should succeed after retries")
+	assert.NotNil(t, conn, "nats.Conn should not be nil")
+	assert.NotNil(t, js, "JetStream context should not be nil")
+
+	// Cleanup
+	conn.Drain()
 }

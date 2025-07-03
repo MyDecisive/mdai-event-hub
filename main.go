@@ -205,5 +205,5 @@ func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, e
 }
 
 func initNatsSubscriber() (eventing.Subscriber, error) {
-	return nats.NewSubscriber(nats.Config{ClientName: "subscriber-event-hub", Logger: logger})
+	return nats.NewSubscriber(logger, "subscriber-event-hub")
 }

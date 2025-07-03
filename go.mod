@@ -9,6 +9,7 @@ require (
 	github.com/decisiveai/mdai-data-core v0.1.7
 	github.com/decisiveai/mdai-operator v0.1.16-0.20250522133829-a3eb3bddb12b
 	github.com/google/uuid v1.6.0
+	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nats-io/nats-server/v2 v2.11.6
 	github.com/nats-io/nats.go v1.43.0
 	github.com/nats-io/nuid v1.0.1

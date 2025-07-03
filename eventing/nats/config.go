@@ -2,12 +2,14 @@ package nats
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"
@@ -15,66 +17,33 @@ import (
 )
 
 const (
-	natsPasswordEnvVar = "NATS_PASS" // TODO add user and password to connect opts
-
-	defaultSubject           = "events"
-	defaultStreamName        = "EVENTS_STREAM"
-	defaultQueueName         = "events"
-	defaultDurableName       = "events_durable"
-	defaultClientName        = "mdai-event"
-	defaultURL               = "nats://nats.default.svc.cluster.local:4222"
-	defaultAckWait           = 30 * time.Second
-	defaultMaxAckPending     = 1
-	defaultDuplicates        = 2 * time.Minute
-	connectTimeout           = 2 * time.Second
-	reconnectWait            = 2 * time.Second
-	defaultInactiveThreshold = 1 * time.Minute
+	connectTimeout = 2 * time.Second
+	reconnectWait  = 2 * time.Second
 )
 
 type Config struct {
-	URL               string
-	Subject           string
-	StreamName        string
-	QueueName         string
-	DurableName       string
-	ClientName        string
-	InactiveThreshold time.Duration
-	Logger            *zap.Logger
+	URL               string        `envconfig:"NATS_URL" default:"nats://nats.default.svc.cluster.local:4222"`
+	Subject           string        `envconfig:"NATS_SUBJECT" default:"events"`
+	StreamName        string        `envconfig:"NATS_STREAM_NAME" default:"EVENTS_STREAM"`
+	QueueName         string        `envconfig:"NATS_QUEUE_NAME" default:"events"`
+	ClientName        string        `envconfig:"-"`
+	InactiveThreshold time.Duration `envconfig:"NATS_INACTIVE_THRESHOLD" default:"1m"`
+	Logger            *zap.Logger   `envconfig:"-"`
 }
 
-func applyDefaults(c *Config) {
-	if c.URL == "" {
-		c.URL = getenv("NATS_URL", defaultURL)
-	}
-	if c.Subject == "" {
-		c.Subject = defaultSubject
-	}
-	if c.StreamName == "" {
-		c.StreamName = defaultStreamName
-	}
-	if c.QueueName == "" {
-		c.QueueName = defaultQueueName
-	}
-	if c.DurableName == "" {
-		c.DurableName = defaultDurableName
-	}
-	if c.ClientName == "" {
-		c.ClientName = defaultClientName
-	}
-	if c.InactiveThreshold == 0 {
-		c.InactiveThreshold = defaultInactiveThreshold
-	}
-	if c.Logger == nil {
-		l, _ := zap.NewProduction()
-		c.Logger = l
-	}
-}
+const (
+	natsPasswordEnvVar   = "NATS_PASS" // TODO add user and password to connect opts
+	defaultAckWait       = 30 * time.Second
+	defaultMaxAckPending = 1
+	defaultDuplicates    = 2 * time.Minute
+)
 
-func getenv(key, def string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		return v
+func LoadConfig() (Config, error) {
+	var cfg Config
+	if err := envconfig.Process("", &cfg); err != nil {
+		return cfg, fmt.Errorf("processing envconfig: %w", err)
 	}
-	return def
+	return cfg, nil
 }
 
 func safeToken(s string) string {

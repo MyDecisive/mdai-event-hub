@@ -22,8 +22,14 @@ type EventPublisher struct {
 	js     jetstream.JetStream
 }
 
-func NewPublisher(cfg Config) (*EventPublisher, error) {
-	applyDefaults(&cfg)
+func NewPublisher(logger *zap.Logger, clientName string) (*EventPublisher, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.Logger = logger
+	cfg.ClientName = clientName
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

@@ -13,6 +13,7 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	natsclient "github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func runJetStream(t *testing.T) (*server.Server, string) {
@@ -30,6 +31,8 @@ func runJetStream(t *testing.T) (*server.Server, string) {
 	if !ns.ReadyForConnections(5 * time.Second) {
 		t.Fatal("nats-server did not start")
 	}
+	assert.NoError(t, os.Setenv("NATS_URL", ns.ClientURL()))
+
 	return ns, ns.ClientURL()
 }
 
@@ -47,12 +50,13 @@ func setPodName(name string) { _ = os.Setenv("POD_NAME", name) }
 func TestElasticGroupDelivery(t *testing.T) {
 	assert := assert.New(t)
 
-	srv, url := runJetStream(t)
+	srv, _ := runJetStream(t)
 	defer srv.Shutdown()
 
-	cfg := Config{URL: url}
+	logger, err := zap.NewDevelopment()
+	assert.NoError(err)
 
-	pub, err := NewPublisher(cfg)
+	pub, err := NewPublisher(logger, "test")
 	assert.NoError(err)
 
 	want := map[string]int{
@@ -73,7 +77,7 @@ func TestElasticGroupDelivery(t *testing.T) {
 
 	for i, id := range []string{"m1", "m2", "m3"} {
 		setPodName(id)
-		sub, err := NewSubscriber(cfg)
+		sub, err := NewSubscriber(logger, "test-subscriber-"+id)
 		assert.NoError(err, "subscriber %d", i)
 		assert.NoError(sub.Subscribe(context.Background(), handler), "subscribe %d", i)
 	}
@@ -101,11 +105,13 @@ func TestElasticGroupDelivery(t *testing.T) {
 // TestPartitionKeyConsistency verifies that messages with the same key
 // are always delivered to the same consumer instance within an elastic group.
 func TestPartitionKeyConsistency(t *testing.T) {
-	srv, url := runJetStream(t)
+	srv, _ := runJetStream(t)
 	defer srv.Shutdown()
 
-	cfg := Config{URL: url}
-	pub, err := NewPublisher(cfg)
+	logger, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-publisher")
 	assert.NoError(t, err)
 
 	// Define two distinct event keys
@@ -135,12 +141,12 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	}
 
 	setPodName("member1")
-	sub1, err := NewSubscriber(cfg)
+	sub1, err := NewSubscriber(logger, "test-subscriber1")
 	assert.NoError(t, err)
 	assert.NoError(t, sub1.Subscribe(context.Background(), handler1))
 
 	setPodName("member2")
-	sub2, err := NewSubscriber(cfg)
+	sub2, err := NewSubscriber(logger, "test-subscriber2")
 	assert.NoError(t, err)
 	assert.NoError(t, sub2.Subscribe(context.Background(), handler2))
 
@@ -182,9 +188,10 @@ func TestDLQForwarding(t *testing.T) {
 	srv, url := runJetStream(t)
 	defer srv.Shutdown()
 
-	cfg := Config{URL: url}
-	applyDefaults(&cfg)
-	pub, err := NewPublisher(cfg)
+	logger, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-publisher")
 	assert.NoError(t, err)
 
 	// Subscribe directly to the DLQ subject
@@ -192,12 +199,12 @@ func TestDLQForwarding(t *testing.T) {
 	assert.NoError(t, err)
 	defer nc.Drain()
 
-	dlqSubject := cfg.Subject + ".dlq"
+	dlqSubject := pub.cfg.Subject + ".dlq"
 	dlqSub, err := nc.SubscribeSync(dlqSubject)
 	assert.NoError(t, err)
 
 	// Create a subscriber whose handler always errors
-	sub, err := NewSubscriber(cfg)
+	sub, err := NewSubscriber(logger, "test-dlq-subscriber")
 	assert.NoError(t, err)
 	err = sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
@@ -221,18 +228,20 @@ func TestDLQForwarding(t *testing.T) {
 // TestDuplicateSuppression ensures that publishing the same message ID twice
 // within the duplicate window only delivers once.
 func TestDuplicateSuppression(t *testing.T) {
-	srv, url := runJetStream(t)
+	srv, _ := runJetStream(t)
 	defer srv.Shutdown()
 
-	cfg := Config{URL: url}
-	pub, err := NewPublisher(cfg)
+	logger, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test")
 	assert.NoError(t, err)
 
 	var mu sync.Mutex
 	delivered := 0
 
 	// Subscriber records each delivery
-	sub, err := NewSubscriber(cfg)
+	sub, err := NewSubscriber(logger, "test")
 	assert.NoError(t, err)
 	err = sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
@@ -264,19 +273,20 @@ func TestDuplicateSuppression(t *testing.T) {
 // TestSingleActiveMember verifies that after registering 10 members then disconnecting them,
 // the lone remaining subscriber receives all events across multiple keys.
 func TestSingleActiveMember(t *testing.T) {
-	srv, url := runJetStream(t)
+	srv, _ := runJetStream(t)
 	defer srv.Shutdown()
 
-	cfg := Config{URL: url, InactiveThreshold: 5 * time.Second}
-	applyDefaults(&cfg)
-	pub, err := NewPublisher(cfg)
+	logger, err := zap.NewDevelopment()
+	assert.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test")
 	assert.NoError(t, err)
 
 	// Register and disconnect 10 subscribers to add them to the group membership
 	for i := 1; i <= 10; i++ {
 		pod := fmt.Sprintf("member_%02d", i)
 		setPodName(pod)
-		sub, err := NewSubscriber(cfg)
+		sub, err := NewSubscriber(logger, "test")
 		assert.NoError(t, err)
 		assert.NoError(t, sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error { return nil }))
 		sub.Close()
@@ -289,7 +299,7 @@ func TestSingleActiveMember(t *testing.T) {
 	setPodName(active)
 	var mu sync.Mutex
 	var received []string
-	sub, err := NewSubscriber(cfg)
+	sub, err := NewSubscriber(logger, "test")
 	assert.NoError(t, err)
 	assert.NoError(t, sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
