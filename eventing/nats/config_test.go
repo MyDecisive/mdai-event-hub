@@ -52,7 +52,7 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err, "failed to pick a free port")
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 
 	logger, err := zap.NewDevelopment()
 	assert.NoError(t, err)
@@ -84,5 +84,5 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	assert.NotNil(t, js, "JetStream context should not be nil")
 
 	// Cleanup
-	conn.Drain()
+	_ = conn.Drain()
 }

@@ -164,7 +164,11 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to create subscriber", zap.Error(err))
 	}
-	defer subscriber.Close()
+	defer func(subscriber eventing.Subscriber) {
+		if err := subscriber.Close(); err != nil {
+			logger.Warn("failed to close NATS subscriber", zap.Error(err))
+		}
+	}(subscriber)
 
 	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
 	if err != nil {

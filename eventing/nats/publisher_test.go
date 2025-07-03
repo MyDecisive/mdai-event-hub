@@ -197,7 +197,11 @@ func TestDLQForwarding(t *testing.T) {
 	// Subscribe directly to the DLQ subject
 	nc, err := natsclient.Connect(url)
 	assert.NoError(t, err)
-	defer nc.Drain()
+	defer func(nc *natsclient.Conn) {
+		if err := nc.Drain(); err != nil {
+			logger.Warn("failed to drain NATS connection", zap.Error(err))
+		}
+	}(nc)
 
 	dlqSubject := pub.cfg.Subject + ".dlq"
 	dlqSub, err := nc.SubscribeSync(dlqSubject)
@@ -289,7 +293,7 @@ func TestSingleActiveMember(t *testing.T) {
 		sub, err := NewSubscriber(logger, "test")
 		assert.NoError(t, err)
 		assert.NoError(t, sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error { return nil }))
-		sub.Close()
+		_ = sub.Close()
 	}
 
 	time.Sleep(2 * time.Second)
@@ -307,7 +311,7 @@ func TestSingleActiveMember(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}))
-	defer sub.Close()
+	_ = sub.Close()
 
 	// Publish events for two keys
 	keys := []string{"KeyA", "KeyB"}
