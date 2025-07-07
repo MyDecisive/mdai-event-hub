@@ -285,8 +285,6 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 	message := args["message"]
 	if message == "" {
 		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
-	} else {
-		message = message
 	}
 	payload := SlackPayload{
 		Text: message,
