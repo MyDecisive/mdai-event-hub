@@ -244,6 +244,44 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 		return fmt.Errorf("failed to process payload: %w", err)
 	}
 
+	payload, err := buildSlackPayload(args, event, payloadData)
+	if err != nil {
+		return err
+	}
+
+	// Marshal the payload into JSON.
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	// Create an HTTP POST request.
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use the default HTTP client.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Warn("Failed to close response body", zap.Error(err))
+		}
+	}()
+
+	// Slack expects a 200 OK response.
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("non-200 response: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
 	message := args["message"]
 	if message == "" {
 		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
@@ -273,7 +311,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	if payloadValuePrimaryKey != "" {
 		payloadValuePrimary, err := getString(payloadData, payloadValuePrimaryKey)
 		if err != nil {
-			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValuePrimaryKey, err)
 		}
 		fields = append(fields, map[string]string{
 			"type": "mrkdwn",
@@ -284,7 +322,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	if payloadValueSecondaryKey != "" {
 		payloadValueSecondary, err := getString(payloadData, payloadValueSecondaryKey)
 		if err != nil {
-			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueSecondaryKey, err)
 		}
 		fields = append(fields, map[string]string{
 			"type": "mrkdwn",
@@ -295,7 +333,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	if payloadValueTertiaryKey != "" {
 		payloadValueTertiary, err := getString(payloadData, payloadValueTertiaryKey)
 		if err != nil {
-			return fmt.Errorf("failed to get %s from payload with error: %w", err)
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueTertiaryKey, err)
 		}
 		fields = append(fields, map[string]string{
 			"type": "mrkdwn",
@@ -331,35 +369,5 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 			},
 		})
 	}
-
-	// Marshal the payload into JSON.
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
-	}
-
-	// Create an HTTP POST request.
-	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Use the default HTTP client.
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			logger.Warn("Failed to close response body", zap.Error(err))
-		}
-	}()
-
-	// Slack expects a 200 OK response.
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("non-200 response: %s", resp.Status)
-	}
-
-	return nil
+	return payload, nil
 }
