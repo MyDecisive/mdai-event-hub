@@ -40,3 +40,8 @@ spec:
             secretKeyRef:
               key: VALKEY_PASSWORD
               name: valkey-secret
+        - name: NATS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: NATS_PASSWORD
+              name: nats-secret

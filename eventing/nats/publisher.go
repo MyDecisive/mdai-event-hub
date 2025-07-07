@@ -107,6 +107,10 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 			})
 	}
 
+	if err != nil && !errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
+		return err // otherwise someone else just created it
+	}
+
 	ec, _ := pcgroups.GetElasticConsumerGroupConfig(ctx, js, cfg.StreamName, eventing.ConsumerGroupName)
 	if ec == nil {
 		_, err = pcgroups.CreateElastic(
@@ -122,12 +126,10 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 		)
 		if err != nil {
 			cfg.Logger.Error("NATS Elastic Consumer Group creation failed", zap.Error(err))
+			return err
 		}
 		cfg.Logger.Info("NATS Elastic Consumer Group created")
 	}
 
-	if errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
-		return nil // someone else just created it
-	}
-	return err
+	return nil
 }

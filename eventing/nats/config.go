@@ -22,12 +22,13 @@ const (
 )
 
 type Config struct {
-	URL               string        `envconfig:"NATS_URL" default:"nats://nats.default.svc.cluster.local:4222"`
+	URL               string        `envconfig:"NATS_URL" default:"nats://mdai-hub-nats.mdai.svc.cluster.local:4222"`
 	Subject           string        `envconfig:"NATS_SUBJECT" default:"events"`
 	StreamName        string        `envconfig:"NATS_STREAM_NAME" default:"EVENTS_STREAM"`
 	QueueName         string        `envconfig:"NATS_QUEUE_NAME" default:"events"`
 	ClientName        string        `envconfig:"-"`
 	InactiveThreshold time.Duration `envconfig:"NATS_INACTIVE_THRESHOLD" default:"1m"`
+	NatsPassword      string        `envconfig:"NATS_PASSWORD"`
 	Logger            *zap.Logger   `envconfig:"-"`
 }
 
@@ -65,6 +66,7 @@ func subjectFromEvent(prefix string, event eventing.MdaiEvent) string {
 
 func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, error) {
 	natsOpts := []nats.Option{
+		nats.UserInfo("mdai", cfg.NatsPassword),
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(-1),
 		nats.Timeout(connectTimeout),
