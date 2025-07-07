@@ -248,7 +248,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	if message == "" {
 		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
 	} else {
-		message = fmt.Sprintf("*%s*", message)
+		message = message
 	}
 	payload := SlackPayload{
 		Text: message,
@@ -350,7 +350,11 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Warn("Failed to close response body", zap.Error(err))
+		}
+	}()
 
 	// Slack expects a 200 OK response.
 	if resp.StatusCode != http.StatusOK {
