@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
+	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 
@@ -50,7 +54,7 @@ func init() {
 }
 
 // ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMapManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKube.ConfigMapController, logger *zap.Logger) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := MdaiInterface{
@@ -76,9 +80,14 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 			return nil
 		}
 
-		workflowMap, err := configMgr.GetConfigMapForHub(ctx, event.HubName)
+		hubData, err := configMgr.GetHubData(event.HubName)
 		if err != nil {
-			return fmt.Errorf("error getting ConfigMap for hub %s: %w", event.HubName, err)
+			return err
+		}
+
+		workflowMap, err := getWorkflowMap(hubData)
+		if err != nil {
+			return fmt.Errorf("error getting workflow map for hub %s: %w", event.HubName, err)
 		}
 
 		var workflowFound bool
@@ -166,11 +175,19 @@ func main() {
 	}
 	defer hub.Close()
 
-	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
+	clientset, err := dcoreKube.NewK8sClient(logger)
+	if err != nil {
+		logger.Fatal("Failed to create k8s client", zap.Error(err))
+		return
+	}
+
+	configMgr, err := dcoreKube.NewConfigMapController(dcoreKube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
-	defer configMgr.Cleanup()
+	if err := configMgr.Run(); err != nil {
+		logger.Fatal("Failed to run  ConfigMap manager", zap.Error(err))
+	}
 
 	// Start listening and block until termination signal
 	err = hub.ListenUntilSignal(ProcessEvent(ctx, valkeyClient, configMgr, logger))
@@ -228,4 +245,22 @@ func initEventHub(ctx context.Context, logger *zap.Logger) (eventing.EventHub, e
 		3*time.Minute,
 		5*time.Second,
 	)
+}
+
+func getWorkflowMap(hubData []map[string]string) (map[string][]v1.AutomationStep, error) {
+	result := make(map[string][]v1.AutomationStep, len(hubData))
+
+	for _, v := range hubData {
+		for k, v := range v {
+			var workflow []v1.AutomationStep
+
+			if err := json.Unmarshal([]byte(v), &workflow); err != nil {
+				logger.Warn("could not unmarshall workflow", zap.String("key", k), zap.Error(err))
+				continue
+			}
+
+			result[k] = workflow
+		}
+	}
+	return result, nil
 }
