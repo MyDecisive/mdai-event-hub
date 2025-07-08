@@ -133,3 +133,5 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 
 	return nil
 }
+
+var _ eventing.Publisher = (*EventPublisher)(nil)

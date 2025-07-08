@@ -193,3 +193,5 @@ func (s *EventSubscriber) Close() error {
 	})
 	return err
 }
+
+var _ eventing.Subscriber = (*EventSubscriber)(nil)

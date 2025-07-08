@@ -16,7 +16,7 @@ const (
 )
 
 type Publisher interface {
-	Publish(MdaiEvent) error
+	Publish(context.Context, MdaiEvent) error
 	Close() error
 }
 
