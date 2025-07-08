@@ -234,8 +234,8 @@ type SlackPayload struct {
 }
 
 func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
-	webhookURL := args["webhook_url"]
-	if webhookURL == "" {
+	webhookURL, webhookURLExists := args["webhook_url"]
+	if !webhookURLExists || webhookURL == "" {
 		return fmt.Errorf("webhook_url is a required arg value, cannot call webhook")
 	}
 
@@ -249,31 +249,22 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 		return err
 	}
 
-	// Marshal the payload into JSON.
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// Create an HTTP POST request.
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	// Use the default HTTP client.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			logger.Warn("Failed to close response body", zap.Error(err))
-		}
-	}()
 
-	// Slack expects a 200 OK response.
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("non-200 response: %s", resp.Status)
 	}
@@ -282,8 +273,8 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 }
 
 func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
-	message := args["message"]
-	if message == "" {
+	message, messageExists := args["message"]
+	if !messageExists || message == "" {
 		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
 	}
 	payload := SlackPayload{
@@ -305,8 +296,8 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 			"text": fmt.Sprintf("*%s* - %s", "Alert timestamp", event.Timestamp),
 		},
 	}
-	payloadValuePrimaryKey := args["payload_val_ref_primary"]
-	if payloadValuePrimaryKey != "" {
+	payloadValuePrimaryKey, payloadValuePrimaryKeyExists := args["payload_val_ref_primary"]
+	if payloadValuePrimaryKeyExists && payloadValuePrimaryKey != "" {
 		payloadValuePrimary, err := getString(payloadData, payloadValuePrimaryKey)
 		if err != nil {
 			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValuePrimaryKey, err)
@@ -316,8 +307,8 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 			"text": fmt.Sprintf("*%s* - %s", payloadValuePrimaryKey, payloadValuePrimary),
 		})
 	}
-	payloadValueSecondaryKey := args["payload_val_ref_secondary"]
-	if payloadValueSecondaryKey != "" {
+	payloadValueSecondaryKey, payloadValueSecondaryKeyExists := args["payload_val_ref_secondary"]
+	if payloadValueSecondaryKeyExists && payloadValueSecondaryKey != "" {
 		payloadValueSecondary, err := getString(payloadData, payloadValueSecondaryKey)
 		if err != nil {
 			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueSecondaryKey, err)
@@ -327,8 +318,8 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 			"text": fmt.Sprintf("*%s* - %s", payloadValueSecondaryKey, payloadValueSecondary),
 		})
 	}
-	payloadValueTertiaryKey := args["payload_val_ref_tertiary"]
-	if payloadValueTertiaryKey != "" {
+	payloadValueTertiaryKey, payloadValueTertiaryKeyExists := args["payload_val_ref_tertiary"]
+	if payloadValueTertiaryKeyExists && payloadValueTertiaryKey != "" {
 		payloadValueTertiary, err := getString(payloadData, payloadValueTertiaryKey)
 		if err != nil {
 			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueTertiaryKey, err)
@@ -346,10 +337,10 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 		})
 	}
 
-	linkText := args["link_text"]
-	linkUrl := args["link_url"]
-	if linkUrl != "" {
-		if linkText == "" {
+	linkText, linkTextExists := args["link_text"]
+	linkUrl, linkUrlExists := args["link_url"]
+	if linkUrlExists && linkUrl != "" {
+		if !linkTextExists || linkText == "" {
 			linkText = "See more"
 		}
 		payload.Blocks = append(payload.Blocks, map[string]any{
