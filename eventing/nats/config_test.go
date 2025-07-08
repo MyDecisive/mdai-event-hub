@@ -66,7 +66,7 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 
 	// Delay server startup to force initial connect failures
 	go func() {
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 		opts := &server.Options{JetStream: true, Port: port}
 		srv, err := server.NewServer(opts)
 		assert.NoError(t, err, "failed to create embedded NATS server")
@@ -75,7 +75,7 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	}()
 
 	// Attempt to connect with retries
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)
