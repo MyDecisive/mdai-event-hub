@@ -33,7 +33,6 @@ type Config struct {
 }
 
 const (
-	natsPasswordEnvVar   = "NATS_PASS" // TODO add user and password to connect opts
 	defaultAckWait       = 30 * time.Second
 	defaultMaxAckPending = 1
 	defaultDuplicates    = 2 * time.Minute
@@ -94,14 +93,7 @@ func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, 
 	}
 
 	// block here until we have completed an INFO/CONNECT/PONG round-trip
-	for {
-		if err := conn.FlushTimeout(250 * time.Millisecond); err == nil {
-			cfg.Logger.Info("NATS connection ready")
-			break
-		}
-		cfg.Logger.Error("NATS connection not ready yet, retrying", zap.Error(err), zap.String("nats_url", cfg.URL))
-		time.Sleep(5 * time.Second)
-	}
+	waitForNATSConnection(ctx, conn, cfg)
 
 	js, err := jetstream.New(conn) // implements pcgroups’ JetStream interface
 	if err != nil {
@@ -112,6 +104,43 @@ func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, 
 
 	cfg.Logger.Info("NATS setup completed")
 	return conn, js, nil
+}
+
+func waitForNATSConnection(ctx context.Context, conn *nats.Conn, cfg Config) {
+	exp := backoff.NewExponentialBackOff()
+	exp.InitialInterval = 250 * time.Millisecond
+	exp.MaxInterval = 60 * time.Second
+	exp.Multiplier = 2.0
+
+	notify := func(err error, next time.Duration) {
+		cfg.Logger.Error(
+			"NATS connection not ready, backing off",
+			zap.Error(err),
+			zap.Duration("next_retry_in", next),
+			zap.String("nats_url", cfg.URL),
+		)
+	}
+
+	operation := func() (bool, error) {
+		// RetryFlush returns nil as soon as FlushTimeout succeeds.
+		if err := conn.FlushTimeout(250 * time.Millisecond); err == nil {
+			cfg.Logger.Info("NATS connection verified")
+			return true, nil
+		} else {
+			return false, err
+		}
+	}
+
+	_, err := backoff.Retry(
+		ctx,
+		operation,
+		backoff.WithBackOff(exp),
+		backoff.WithNotify(notify),
+	)
+	if err != nil {
+		cfg.Logger.Fatal("Unable to establish NATS connection", zap.Error(err))
+	}
+	cfg.Logger.Info("NATS connection ready")
 }
 
 func getMemberIDs() string {

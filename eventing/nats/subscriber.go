@@ -24,6 +24,7 @@ type EventSubscriber struct {
 	waitGroup sync.WaitGroup
 	closeCh   chan struct{}
 	closeOnce sync.Once
+	memberId  string
 }
 
 func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, error) {
@@ -35,7 +36,7 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 	cfg.Logger = logger
 	cfg.ClientName = clientName
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)
@@ -49,6 +50,7 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 		conn:      conn,
 		jetStream: js,
 		closeCh:   make(chan struct{}),
+		memberId:  getMemberIDs(),
 	}, nil
 }
 
@@ -129,7 +131,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		return fmt.Errorf("get Elastic Consumer Group config: %w", err)
 	}
 
-	memberID := getMemberIDs()
+	memberID := s.memberId
 	if !ec.IsInMembership(memberID) {
 		members, err := pcgroups.AddMembers(
 			ctx,
@@ -141,7 +143,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		if err != nil {
 			return err
 		}
-		s.logger.Info("Subscribing with member ID", zap.String("memberID", memberID), zap.Any("members", members))
+		s.logger.Info("Subscribed with member ID", zap.String("memberID", memberID), zap.Any("members", members))
 	}
 
 	if _, err := pcgroups.ElasticConsume(
@@ -155,6 +157,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 	); err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
+	s.logger.Info("Consumer started", zap.String("subject", s.cfg.Subject))
 
 	go func() {
 		select {
@@ -172,18 +175,17 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 func (s *EventSubscriber) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
-		memberID := getMemberIDs()
-		dropped, dropErr := pcgroups.DeleteMembers(
+		members, dropErr := pcgroups.DeleteMembers(
 			context.Background(),
 			s.jetStream,
 			s.cfg.StreamName,
 			eventing.ConsumerGroupName,
-			[]string{memberID},
+			[]string{s.memberId},
 		)
 		if dropErr != nil {
-			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.Strings("dropped", dropped))
+			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.String("memberId", s.memberId), zap.Strings("members", members))
 		} else {
-			s.logger.Info("deregistered from elastic group", zap.Strings("dropped", dropped))
+			s.logger.Info("deregistered from elastic group", zap.String("memberId", s.memberId), zap.Strings("members", members))
 		}
 
 		close(s.closeCh)
