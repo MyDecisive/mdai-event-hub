@@ -4,7 +4,7 @@ metadata:
   name: {{ .Values.deployment.name }}
   namespace: {{ .Values.deployment.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.deployment.replicas | default 1 }}
   selector:
     matchLabels:
       app: {{ .Values.deployment.name }}
@@ -20,6 +20,10 @@ spec:
         ports:
         - containerPort: {{ .Values.deployment.containerPort }}
         env:
+        - name: POD_NAME
+          valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
         - name: HTTP_PORT
           value: "{{ .Values.deployment.containerPort }}"
         - name: VALKEY_AUDIT_STREAM_EXPIRY_MS
@@ -36,13 +40,8 @@ spec:
             secretKeyRef:
               key: VALKEY_PASSWORD
               name: valkey-secret
-        - name: RABBITMQ_ENDPOINT
+        - name: NATS_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: rabbitmq-secret
-              key: RABBITMQ_ENDPOINT
-        - name: RABBITMQ_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: rabbitmq-secret
-              key: RABBITMQ_PASSWORD
+              key: NATS_PASSWORD
+              name: nats-secret
