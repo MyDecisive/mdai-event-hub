@@ -44,6 +44,11 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
+	if err := ensureStream(ctx, js, cfg); err != nil {
+		_ = conn.Drain()
+		return nil, fmt.Errorf("ensure stream: %w", err)
+	}
+
 	return &EventSubscriber{
 		cfg:       cfg,
 		logger:    cfg.Logger,

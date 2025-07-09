@@ -96,8 +96,8 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 		}
 
 		if !workflowFound {
-			logger.Warn("No configured automation for event", zap.String("name", event.Name))
-			return nil // Don't treat this as an error, just log a warning
+			logger.Error("No configured automation for event", zap.String("name", event.Name))
+			return fmt.Errorf("no configured automation for event: %s", event.Name)
 		}
 
 		for _, automationStep := range steps {
