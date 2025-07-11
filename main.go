@@ -181,13 +181,15 @@ func main() {
 		return
 	}
 
+	stopCh := make(chan struct{})
 	configMgr, err := dcoreKube.NewConfigMapController(dcoreKube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
-	if err := configMgr.Run(); err != nil {
+	if err := configMgr.Run(stopCh); err != nil {
 		logger.Fatal("Failed to run  ConfigMap manager", zap.Error(err))
 	}
+	defer configMgr.Stop(stopCh)
 
 	// Start listening and block until termination signal
 	err = hub.ListenUntilSignal(ProcessEvent(ctx, valkeyClient, configMgr, logger))
