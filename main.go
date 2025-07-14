@@ -31,8 +31,6 @@ var (
 const (
 	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
 	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
-
-	automationConfigMapNamePostfix = "-automation"
 )
 
 func init() {
