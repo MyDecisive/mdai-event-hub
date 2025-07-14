@@ -56,8 +56,7 @@ func TestProcessEvent_Success(t *testing.T) {
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
-	stopCh := make(chan struct{})
-	if err := cmController.Run(stopCh); err != nil {
+	if err := cmController.Run(); err != nil {
 		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
 	}
 
@@ -108,10 +107,10 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
-	stopCh := make(chan struct{})
-	if err := cmController.Run(stopCh); err != nil {
+	if err := cmController.Run(); err != nil {
 		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
 	}
+	defer cmController.Stop()
 
 	testHandlerCalled = false
 	testHandlerError = nil
@@ -159,10 +158,10 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
-	stopCh := make(chan struct{})
-	if err := cmController.Run(stopCh); err != nil {
+	if err := cmController.Run(); err != nil {
 		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
 	}
+	defer cmController.Stop()
 
 	testHandlerCalled = false
 	testHandlerError = nil
@@ -208,10 +207,10 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
-	stopCh := make(chan struct{})
-	if err := cmController.Run(stopCh); err != nil {
+	if err := cmController.Run(); err != nil {
 		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
 	}
+	defer cmController.Stop()
 
 	testHandlerCalled = false
 	testHandlerError = nil
