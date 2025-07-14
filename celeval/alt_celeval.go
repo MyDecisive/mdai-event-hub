@@ -7,19 +7,15 @@ import (
 	"github.com/google/cel-go/common/types"
 )
 
-// CELEvaluator handles CEL expression evaluation
 type CELEvaluator struct {
 	env *cel.Env
 }
 
-// CompiledCELExpression holds the pre-compiled CEL expression
 type CompiledCELExpression struct {
 	program cel.Program
 }
 
-// NewCELEvaluator creates a new CEL evaluator instance
 func NewCELEvaluator() (*CELEvaluator, error) {
-	// Create CEL environment with common types
 	env, err := cel.NewEnv(
 		cel.Variable("id", cel.StringType),
 		cel.Variable("source", cel.StringType),
@@ -42,7 +38,6 @@ func NewCELEvaluator() (*CELEvaluator, error) {
 	return &CELEvaluator{env: env}, nil
 }
 
-// CompileCELExpression pre-compiles a CEL expression
 func (c *CELEvaluator) CompileCELExpression(expression string) (*CompiledCELExpression, error) {
 	ast, issues := c.env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
@@ -57,9 +52,7 @@ func (c *CELEvaluator) CompileCELExpression(expression string) (*CompiledCELExpr
 	return &CompiledCELExpression{program: program}, nil
 }
 
-// EvaluateCELExpression evaluates a pre-compiled CEL expression
 func (c *CELEvaluator) EvaluateCELExpression(compiled *CompiledCELExpression, env map[string]interface{}) (interface{}, error) {
-	// Convert map to CEL-compatible format
 	celEnv := make(map[string]interface{})
 	for k, v := range env {
 		celEnv[k] = types.DefaultTypeAdapter.NativeToValue(v)
@@ -73,7 +66,6 @@ func (c *CELEvaluator) EvaluateCELExpression(compiled *CompiledCELExpression, en
 	return result.Value(), nil
 }
 
-// EvaluateCELExpressionString evaluates a CEL expression string directly
 func (c *CELEvaluator) EvaluateCELExpressionString(expression string, env map[string]interface{}) (interface{}, error) {
 	compiled, err := c.CompileCELExpression(expression)
 	if err != nil {
@@ -83,20 +75,16 @@ func (c *CELEvaluator) EvaluateCELExpressionString(expression string, env map[st
 	return c.EvaluateCELExpression(compiled, env)
 }
 
-// GovaluateEvaluator handles Govaluate expression evaluation
 type GovaluateEvaluator struct{}
 
-// CompiledGovaluateExpression holds the pre-compiled Govaluate expression
 type CompiledGovaluateExpression struct {
 	expression *govaluate.EvaluableExpression
 }
 
-// NewGovaluateEvaluator creates a new Govaluate evaluator instance
 func NewGovaluateEvaluator() *GovaluateEvaluator {
 	return &GovaluateEvaluator{}
 }
 
-// CompileGovaluateExpression pre-compiles a Govaluate expression
 func (g *GovaluateEvaluator) CompileGovaluateExpression(expression string) (*CompiledGovaluateExpression, error) {
 	expr, err := govaluate.NewEvaluableExpression(expression)
 	if err != nil {
@@ -106,7 +94,6 @@ func (g *GovaluateEvaluator) CompileGovaluateExpression(expression string) (*Com
 	return &CompiledGovaluateExpression{expression: expr}, nil
 }
 
-// EvaluateGovaluateExpression evaluates a pre-compiled Govaluate expression
 func (g *GovaluateEvaluator) EvaluateGovaluateExpression(compiled *CompiledGovaluateExpression, env map[string]interface{}) (interface{}, error) {
 	result, err := compiled.expression.Evaluate(env)
 	if err != nil {
@@ -116,7 +103,6 @@ func (g *GovaluateEvaluator) EvaluateGovaluateExpression(compiled *CompiledGoval
 	return result, nil
 }
 
-// EvaluateGovaluateExpressionString evaluates a Govaluate expression string directly
 func (g *GovaluateEvaluator) EvaluateGovaluateExpressionString(expression string, env map[string]interface{}) (interface{}, error) {
 	compiled, err := g.CompileGovaluateExpression(expression)
 	if err != nil {
