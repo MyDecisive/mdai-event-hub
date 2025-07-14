@@ -1,11 +1,8 @@
 package celeval
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/expr-lang/expr/vm"
-	"strings"
-	"text/template"
 	"time"
 
 	"github.com/expr-lang/expr"
@@ -24,159 +21,9 @@ type CommandEvent struct {
 	CausationId     string                 `json:"causationid,omitempty"`
 }
 
-// EvaluationContext holds all data available during evaluation
-type EvaluationContext struct {
-	Event  *CommandEvent          `json:"event"`
-	Config map[string]interface{} `json:"config"`
-}
-
-// CompiledTemplate holds the pre-compiled template for interpolation
-type CompiledTemplate struct {
-	template *template.Template
-}
-
 // CompiledExpression holds the pre-compiled expression for evaluation
 type CompiledExpression struct {
 	program *vm.Program
-}
-
-// Interpolator handles template-based field interpolation
-type Interpolator struct {
-	topLevelFields map[string]bool
-}
-
-// NewInterpolator creates a new interpolator instance
-func NewInterpolator() *Interpolator {
-	return &Interpolator{
-		topLevelFields: map[string]bool{
-			"Id":              true,
-			"Source":          true,
-			"Subject":         true,
-			"DataContentType": true,
-			"Time":            true,
-			"HubName":         true,
-			"CorrelationId":   true,
-			"CausationId":     true,
-		},
-	}
-}
-
-// CompileTemplate pre-compiles a template at rule definition time
-func (i *Interpolator) CompileTemplate(templateString string) (*CompiledTemplate, error) {
-	// Transform interpolation syntax using custom scanner
-	transformed := i.transformInterpolation(templateString)
-
-	// Compile the template
-	tmpl, err := template.New("template").Parse(transformed)
-	if err != nil {
-		return nil, fmt.Errorf("template compilation failed: %w", err)
-	}
-
-	return &CompiledTemplate{template: tmpl}, nil
-}
-
-// Interpolate executes template interpolation against context
-func (i *Interpolator) Interpolate(compiled *CompiledTemplate, event *CommandEvent, config map[string]interface{}) (string, error) {
-	ctx := &EvaluationContext{
-		Event:  event,
-		Config: config,
-	}
-
-	var buf bytes.Buffer
-	if err := compiled.template.Execute(&buf, ctx); err != nil {
-		return "", fmt.Errorf("template execution failed: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-// transformInterpolation converts {{field}} and {{config.field}} syntax to template paths
-func (i *Interpolator) transformInterpolation(condition string) string {
-	var result strings.Builder
-	idx := 0
-
-	for idx < len(condition) {
-		// Look for opening {{
-		if idx < len(condition)-1 && condition[idx:idx+2] == "{{" {
-			// Find closing }}
-			end := strings.Index(condition[idx:], "}}")
-			if end != -1 {
-				// Extract field path and trim whitespace
-				fieldPath := strings.TrimSpace(condition[idx+2 : idx+end])
-
-				// Transform the field path
-				transformed := i.transformFieldPath(fieldPath)
-				result.WriteString("{{" + transformed + "}}")
-
-				idx += end + 2
-				continue
-			}
-		}
-
-		// Copy character as-is
-		result.WriteByte(condition[idx])
-		idx++
-	}
-
-	return result.String()
-}
-
-// transformFieldPath converts field paths to template syntax
-func (i *Interpolator) transformFieldPath(fieldPath string) string {
-	parts := strings.Split(fieldPath, ".")
-
-	if len(parts) == 0 {
-		return fieldPath
-	}
-
-	// Handle config paths: config.field.subfield -> .Config.field.subfield
-	if parts[0] == "config" {
-		if len(parts) == 1 {
-			return ".Config"
-		}
-		// Build path: .Config.field.subfield...
-		return ".Config." + strings.Join(parts[1:], ".")
-	}
-
-	// Handle single field names (event data or top-level fields)
-	if len(parts) == 1 {
-		field := parts[0]
-		if i.isTopLevelField(field) {
-			return ".Event." + i.capitalizeField(field)
-		}
-		return ".Event.Data." + field
-	}
-
-	// Handle nested event data paths: field.subfield -> .Event.Data.field.subfield
-	return ".Event.Data." + strings.Join(parts, ".")
-}
-
-// isTopLevelField checks if a field name corresponds to a top-level CommandEvent field
-func (i *Interpolator) isTopLevelField(field string) bool {
-	// Check both lowercase and capitalized versions
-	return i.topLevelFields[field] || i.topLevelFields[i.capitalizeField(field)]
-}
-
-// capitalizeField converts field names to match Go struct field names
-func (i *Interpolator) capitalizeField(field string) string {
-	if len(field) == 0 {
-		return field
-	}
-
-	// Handle common field name mappings
-	switch strings.ToLower(field) {
-	case "datacontenttype":
-		return "DataContentType"
-	case "hubname":
-		return "HubName"
-	case "correlationid":
-		return "CorrelationId"
-	case "causationid":
-		return "CausationId"
-	default:
-		// Capitalize first letter for other fields
-		return strings.ToUpper(field[:1]) + field[1:]
-	}
 }
 
 // Evaluator handles expression evaluation using expr
@@ -241,7 +88,7 @@ type CompiledCondition struct {
 // CompileCondition pre-compiles a condition (interpolation + optional expression)
 func (ce *ConditionEvaluator) CompileCondition(condition string, isExpr bool) (*CompiledCondition, error) {
 	// Always compile the template for interpolation
-	compiledTemplate, err := ce.interpolator.CompileTemplate(condition)
+	compiledTemplate, err := ce.interpolator.CompileTemplate(condition, true)
 	if err != nil {
 		return nil, err
 	}
@@ -315,94 +162,3 @@ func (ce *ConditionEvaluator) BuildEnvironment(event *CommandEvent, config map[s
 
 	return env
 }
-
-//// Example usage and benchmarking setup
-//func main() {
-//	// Create components
-//	interpolator := NewInterpolator()
-//	evaluator := NewEvaluator()
-//	conditionEvaluator := NewConditionEvaluator()
-//
-//	// Example data
-//	event := &CommandEvent{
-//		Id:              "event-123",
-//		Source:          "alertmanager",
-//		Subject:         "alert.alertmanager.firing",
-//		DataContentType: "application/json",
-//		Time:            time.Now(),
-//		HubName:         "production",
-//		Data: map[string]interface{}{
-//			"alertname":    "logBytesOutTooHighBySvc",
-//			"status":       "firing",
-//			"service_name": "payment-service",
-//			"severity":     "warning",
-//		},
-//		CorrelationId: "corr-456",
-//		CausationId:   "cause-789",
-//	}
-//
-//	config := map[string]interface{}{
-//		"severity_threshold": "warning",
-//		"rate_limit": map[string]interface{}{
-//			"max_events": 100,
-//		},
-//	}
-//
-//	// Example 1: Test interpolation only
-//	fmt.Println("=== Interpolation Only ===")
-//	templateStr := "Alert {{alertname}} is {{status}} for service {{service_name}}"
-//	compiledTemplate, err := interpolator.CompileTemplate(templateStr)
-//	if err != nil {
-//		fmt.Printf("Template compilation error: %v\n", err)
-//		return
-//	}
-//
-//	interpolated, err := interpolator.Interpolate(compiledTemplate, event, config)
-//	if err != nil {
-//		fmt.Printf("Interpolation error: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("Template: %s\n", templateStr)
-//	fmt.Printf("Result: %s\n", interpolated)
-//
-//	// Example 2: Test expression evaluation only
-//	fmt.Println("\n=== Expression Only ===")
-//	env := conditionEvaluator.BuildEnvironment(event, config)
-//	expression := `alertname == "logBytesOutTooHighBySvc" && status == "firing"`
-//
-//	result, err := evaluator.EvaluateExpressionString(expression, env)
-//	if err != nil {
-//		fmt.Printf("Expression error: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("Expression: %s\n", expression)
-//	fmt.Printf("Result: %v\n", result)
-//
-//	// Example 3: Test combined approach
-//	fmt.Println("\n=== Combined Approach ===")
-//	condition := `{{alertname}} == "logBytesOutTooHighBySvc" && {{status}} == "firing" && {{severity}} == {{config.severity_threshold}}`
-//	compiledCondition, err := conditionEvaluator.CompileCondition(condition, true)
-//	if err != nil {
-//		fmt.Printf("Condition compilation error: %v\n", err)
-//		return
-//	}
-//
-//	conditionResult, err := conditionEvaluator.EvaluateCondition(compiledCondition, event, config)
-//	if err != nil {
-//		fmt.Printf("Condition evaluation error: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("Condition: %s\n", condition)
-//	fmt.Printf("Result: %v\n", conditionResult)
-//
-//	// Example 4: Test env-based approach for comparison
-//	fmt.Println("\n=== Environment-Based Approach ===")
-//	envExpression := `alertname == "logBytesOutTooHighBySvc" && status == "firing" && severity == config.severity_threshold`
-//	envResult, err := conditionEvaluator.EvaluateConditionWithEnv(envExpression, env)
-//	if err != nil {
-//		fmt.Printf("Env-based evaluation error: %v\n", err)
-//		return
-//	}
-//	fmt.Printf("Expression: %s\n", envExpression)
-//	fmt.Printf("Result: %v\n", envResult)
-//}
