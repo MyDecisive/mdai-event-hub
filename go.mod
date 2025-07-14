@@ -72,4 +72,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/decisiveai/mdai-data-core => ../mdai-data-core
+replace github.com/decisiveai/mdai-data-core => github.com/decisiveai/mdai-data-core v0.0.0-20250714190113-94091e2a13f0
