@@ -1,18 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"go.uber.org/zap"
+	"net/http"
 )
 
 const (
 	HandleAddNoisyServiceToSet      HandlerName = "HandleAddNoisyServiceToSet"
 	HandleRemoveNoisyServiceFromSet HandlerName = "HandleRemoveNoisyServiceFromSet"
 	HandleNoisyServiceAlert         HandlerName = "HandleNoisyServiceAlert"
+	HandleCallSlackWebhook          HandlerName = "HandleCallSlackWebhook"
 )
 
 // SupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
@@ -23,6 +25,7 @@ var SupportedHandlers = HandlerMap{
 	HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
 	HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
 	HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
+	HandleCallSlackWebhook:          HandleCallSlackWebhookFn,
 }
 
 func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
@@ -223,4 +226,137 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 		}
 	}
 	return nil
+}
+
+type SlackPayload struct {
+	Text   string           `json:"text"`
+	Blocks []map[string]any `json:"blocks,omitempty"`
+}
+
+func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+	webhookURL, webhookURLExists := args["webhook_url"]
+	if !webhookURLExists || webhookURL == "" {
+		return fmt.Errorf("webhook_url is a required arg value, cannot call webhook")
+	}
+
+	payloadData, err := processEventPayload(event)
+	if err != nil {
+		return fmt.Errorf("failed to process payload: %w", err)
+	}
+
+	payload, err := buildSlackPayload(args, event, payloadData)
+	if err != nil {
+		return err
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("non-200 response: %s", resp.Status)
+	}
+
+	return nil
+}
+
+func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
+	message, messageExists := args["message"]
+	if !messageExists || message == "" {
+		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
+	}
+	payload := SlackPayload{
+		Text: message,
+		Blocks: []map[string]any{
+			{
+				"type": "section",
+				"text": map[string]string{
+					"type": "mrkdwn",
+					"text": fmt.Sprintf("*%s*", message),
+				},
+			},
+		},
+	}
+
+	fields := []map[string]string{
+		{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", "Alert timestamp", event.Timestamp),
+		},
+	}
+	payloadValuePrimaryKey, payloadValuePrimaryKeyExists := args["payload_val_ref_primary"]
+	if payloadValuePrimaryKeyExists && payloadValuePrimaryKey != "" {
+		payloadValuePrimary, err := getString(payloadData, payloadValuePrimaryKey)
+		if err != nil {
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValuePrimaryKey, err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValuePrimaryKey, payloadValuePrimary),
+		})
+	}
+	payloadValueSecondaryKey, payloadValueSecondaryKeyExists := args["payload_val_ref_secondary"]
+	if payloadValueSecondaryKeyExists && payloadValueSecondaryKey != "" {
+		payloadValueSecondary, err := getString(payloadData, payloadValueSecondaryKey)
+		if err != nil {
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueSecondaryKey, err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValueSecondaryKey, payloadValueSecondary),
+		})
+	}
+	payloadValueTertiaryKey, payloadValueTertiaryKeyExists := args["payload_val_ref_tertiary"]
+	if payloadValueTertiaryKeyExists && payloadValueTertiaryKey != "" {
+		payloadValueTertiary, err := getString(payloadData, payloadValueTertiaryKey)
+		if err != nil {
+			return SlackPayload{}, fmt.Errorf("failed to get %s from payload with error: %w", payloadValueTertiaryKey, err)
+		}
+		fields = append(fields, map[string]string{
+			"type": "mrkdwn",
+			"text": fmt.Sprintf("*%s* - %s", payloadValueTertiaryKey, payloadValueTertiary),
+		})
+	}
+
+	if len(fields) > 0 {
+		payload.Blocks = append(payload.Blocks, map[string]any{
+			"type":   "section",
+			"fields": fields,
+		})
+	}
+
+	linkText, linkTextExists := args["link_text"]
+	linkUrl, linkUrlExists := args["link_url"]
+	if linkUrlExists && linkUrl != "" {
+		if !linkTextExists || linkText == "" {
+			linkText = "See more"
+		}
+		payload.Blocks = append(payload.Blocks, map[string]any{
+			"type": "actions",
+			"elements": []map[string]any{
+				{
+					"type": "button",
+					"text": map[string]string{
+						"type": "plain_text",
+						"text": linkText,
+					},
+					"style": "primary",
+					"url":   linkUrl,
+				},
+			},
+		})
+	}
+	return payload, nil
 }

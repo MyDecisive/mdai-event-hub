@@ -223,7 +223,8 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 	handler := ProcessEvent(ctx, mockClient, cmController, logger)
 	err = handler(event)
 
-	assert.NoError(t, err)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured automation for event: UnknownAlert.firing")
 }
 
 func TestSafePerformAutomationStep_Success(t *testing.T) {

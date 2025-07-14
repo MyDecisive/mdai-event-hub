@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/cenkalti/backoff/v5"
 	"time"
+
+	"github.com/cenkalti/backoff/v5"
 
 	"go.uber.org/zap"
 )
