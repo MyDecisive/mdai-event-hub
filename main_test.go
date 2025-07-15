@@ -71,7 +71,7 @@ func TestProcessEvent_Success(t *testing.T) {
 		"testHandler": testHandler,
 	}
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
 	assert.NoError(t, err)
@@ -122,7 +122,7 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 		"testHandler": testHandler,
 	}
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
 	assert.Error(t, err)
@@ -174,7 +174,7 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 		"testHandler": testHandler,
 	}
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
 	assert.NoError(t, err)
@@ -220,7 +220,7 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 		Name:    "UnknownAlert.firing",
 	}
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
 	assert.Error(t, err)

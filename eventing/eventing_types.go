@@ -35,6 +35,7 @@ type MdaiEvent struct {
 	Timestamp     time.Time `json:"timestamp,omitempty"`
 	Payload       string    `json:"payload"`
 	Source        string    `json:"source"`
+	SourceId      string    `json:"sourceId"`
 	CorrelationId string    `json:"correlationId,omitempty"`
 	HubName       string    `json:"hubName"`
 }
@@ -43,6 +44,7 @@ func (mdaiEvent *MdaiEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("name", mdaiEvent.Name)
 	enc.AddString("id", mdaiEvent.Id)
 	enc.AddString("source", mdaiEvent.Source)
+	enc.AddString("source_id", mdaiEvent.SourceId)
 	enc.AddString("hub_name", mdaiEvent.HubName)
 	enc.AddString("payload", mdaiEvent.Payload)
 	enc.AddTime("timestamp", mdaiEvent.Timestamp)
