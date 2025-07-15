@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/decisiveai/mdai-data-core/audit"
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/decisiveai/mdai-event-hub/eventing/nats"
@@ -25,8 +27,10 @@ var (
 )
 
 const (
-	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
-	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
+	valkeyEndpointEnvVarKey            = "VALKEY_ENDPOINT"
+	valkeyPasswordEnvVarKey            = "VALKEY_PASSWORD"
+	valkeyAuditStreamExpiryMSEnvVarKey = "VALKEY_AUDIT_STREAM_EXPIRY_MS"
+	mdaiHubEventHistoryStreamName      = "mdai_hub_event_history"
 
 	automationConfigMapNamePostfix = "-automation"
 )
@@ -50,7 +54,7 @@ func init() {
 }
 
 // ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMapManagerInterface, logger *zap.Logger) eventing.HandlerInvoker {
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMapManagerInterface, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := MdaiInterface{
@@ -101,11 +105,26 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 		}
 
 		for _, automationStep := range steps {
-			if err := safePerformAutomationStep(mdaiInterface, automationStep, event); err != nil {
+			err := safePerformAutomationStep(mdaiInterface, automationStep, event)
+
+			if auditAdapter != nil {
+				if auditErr := recordAuditEventFromMdaiEvent(ctx, logger, auditAdapter, event, automationStep, err == nil); auditErr != nil {
+					logger.Error("Failed to write audit event for automation step",
+						zap.String("hubName", event.HubName),
+						zap.String("name", event.Name),
+						zap.String("handlerRef", automationStep.HandlerRef),
+						zap.String("eventCorrelationId", event.CorrelationId),
+						zap.Error(err),
+					)
+				}
+			}
+
+			if err != nil {
 				logger.Error("Automation step failed",
 					zap.String("hubName", event.HubName),
 					zap.String("name", event.Name),
 					zap.String("handlerRef", automationStep.HandlerRef),
+					zap.String("eventCorrelationId", event.CorrelationId),
 					zap.Error(err),
 				)
 				return err
@@ -125,6 +144,7 @@ func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, e
 				zap.String("handlerRef", autoStep.HandlerRef),
 				zap.String("eventName", event.Name),
 				zap.String("hubName", event.HubName),
+				zap.String("eventCorrelationId", event.CorrelationId),
 			)
 			err = fmt.Errorf("panic in handler %s: %v", autoStep.HandlerRef, r)
 		}
@@ -133,7 +153,6 @@ func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, e
 	handlerName := HandlerName(autoStep.HandlerRef)
 
 	if handlerFn, exists := SupportedHandlers[handlerName]; exists {
-		// TODO add event audit here
 		if err := handlerFn(mdai, event, autoStep.Arguments); err != nil {
 			return fmt.Errorf("handler %s failed: %w", handlerName, err)
 		}
@@ -149,6 +168,23 @@ func getEnvVariableWithDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, automationStep v1.AutomationStep, automationSucceeded bool) error {
+	eventMap := map[string]string{
+		"id":                     event.Id,
+		"name":                   event.Name,
+		"timestamp":              event.Timestamp.UTC().Format(time.RFC3339),
+		"payload":                event.Payload,
+		"source":                 event.Source,
+		"sourceId":               event.SourceId,
+		"correlation_id":         event.CorrelationId,
+		"hub_name":               event.HubName,
+		"automation_succeeded":   strconv.FormatBool(automationSucceeded),
+		"automation_handler_ref": automationStep.HandlerRef,
+	}
+	logger.Info("AUDIT: MdaiEvent handled", zap.String("mdai-logstream", "audit"), zap.Any("mdaiEvent", eventMap))
+	return auditAdapter.InsertAuditLogEventFromMap(ctx, eventMap)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -159,6 +195,20 @@ func main() {
 		logger.Fatal("failed to get valkey client", zap.Error(err))
 	}
 	defer valkeyClient.Close()
+
+	valkeyAuditStreamExpiry := 30 * 24 * time.Hour
+	valkeyStreamExpiryMsStr := os.Getenv(valkeyAuditStreamExpiryMSEnvVarKey)
+	if valkeyStreamExpiryMsStr != "" {
+		envExpiryMs, err := strconv.Atoi(valkeyStreamExpiryMsStr)
+		if err != nil {
+			logger.Fatal("Failed to parse valkeyStreamExpiryMs env var", zap.Error(err))
+			return
+		}
+		valkeyAuditStreamExpiry = time.Duration(envExpiryMs) * time.Millisecond
+		logger.Info("Using custom "+mdaiHubEventHistoryStreamName+" expiration threshold MS", zap.Int64("valkeyAuditStreamExpiryMs", valkeyAuditStreamExpiry.Milliseconds()))
+	}
+
+	auditAdapter := audit.NewAuditAdapter(logger, valkeyClient, valkeyAuditStreamExpiry)
 
 	subscriber, err := initNatsSubscriber()
 	if err != nil {
@@ -176,7 +226,7 @@ func main() {
 	}
 	defer configMgr.Cleanup()
 
-	err = subscriber.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger))
+	err = subscriber.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger, auditAdapter))
 	if err != nil {
 		logger.Fatal("Failed to start event listener", zap.Error(err))
 	}
