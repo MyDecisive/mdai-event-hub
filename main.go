@@ -80,7 +80,7 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKub
 
 		hubData, err := configMgr.GetHubData(event.HubName)
 		if err != nil {
-			return err
+			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
 		}
 
 		workflowMap := getWorkflowMap(hubData)
