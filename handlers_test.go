@@ -75,7 +75,7 @@ func TestHandleAddNoisyServiceToSet(t *testing.T) {
 	event := eventing.MdaiEvent{
 		Id:            "testId",
 		Name:          "testName",
-		Payload:       "{\"key\":\"bazfoo\"}",
+		Payload:       `{"key":"bazfoo"}`,
 		Source:        "testSource",
 		SourceId:      "testSourceId",
 		CorrelationId: "bob",
@@ -105,7 +105,7 @@ func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
 	event := eventing.MdaiEvent{
 		Id:            "testId",
 		Name:          "testName",
-		Payload:       "{\"key\":\"bazfoo\"}",
+		Payload:       `{"key":"bazfoo"}`,
 		Source:        "testSource",
 		SourceId:      "testSourceId",
 		CorrelationId: "bob",
@@ -137,7 +137,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"set\",\"operation\":\"add\",\"variableRef\":\"foobar\", \"data\": [\"bazfoo\"]}",
+				Payload:       `{"dataType":"set","operation":"add","variableRef":"foobar", "data": ["bazfoo"]}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -156,7 +156,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"set\",\"operation\":\"remove\",\"variableRef\":\"foobar\", \"data\": [\"bazfoo\"]}",
+				Payload:       `{"dataType":"set","operation":"remove","variableRef":"foobar", "data": ["bazfoo"]}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -175,7 +175,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"map\",\"operation\":\"add\",\"variableRef\":\"foobar\", \"data\": {\"argh\": \"blargh\"}}",
+				Payload:       `{"dataType":"map","operation":"add","variableRef":"foobar", "data": {"argh": "blargh"}}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -195,7 +195,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"map\",\"operation\":\"remove\",\"variableRef\":\"foobar\", \"data\": [\"bazfoo\"]}",
+				Payload:       `{"dataType":"map","operation":"remove","variableRef":"foobar", "data": ["bazfoo"]}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -214,7 +214,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"string\",\"variableRef\":\"foobar\", \"data\": \"bazfoo\"}",
+				Payload:       `{"dataType":"string","variableRef":"foobar", "data": "bazfoo"}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -233,7 +233,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"int\",\"variableRef\":\"foobar\", \"data\": \"3\"}",
+				Payload:       `{"dataType":"int","variableRef":"foobar", "data": "3"}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -252,7 +252,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			event: eventing.MdaiEvent{
 				Id:            "testId",
 				Name:          "testName",
-				Payload:       "{\"dataType\":\"boolean\",\"variableRef\":\"foobar\", \"data\": \"false\"}",
+				Payload:       `{"dataType":"boolean","variableRef":"foobar", "data": "false"}`,
 				Source:        "testSource",
 				SourceId:      "testSourceId",
 				CorrelationId: "bob",
@@ -271,7 +271,6 @@ func TestHandleManualVariablesActions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
 			mockHandlerAdapter := &MockHandlerAdapter{
 				Calls: make(map[string][]map[string]string),
 			}
@@ -279,7 +278,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				logger: zap.NewNop(),
 				data:   mockHandlerAdapter,
 			}
-			assert.NoError(t, handleManualVariablesActions(ctx, mdaiInterface, tc.event))
+			assert.NoError(t, handleManualVariablesActions(t.Context(), mdaiInterface, tc.event))
 			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
 		})
 	}
