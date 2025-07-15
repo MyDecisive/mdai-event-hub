@@ -353,3 +353,35 @@ func TestProcessEventPayload_InvalidJSON(t *testing.T) {
 	assert.Error(t, err, "expected an error for invalid JSON payload")
 	assert.Contains(t, err.Error(), "failed to unmarshal payload")
 }
+
+func TestGetWorkflowMap(t *testing.T) {
+	steps := []map[string]string{
+		{"TestAlert1.firing": "[{\"handlerRef\" :\"testHandler1\", \"args\": {\"key1\":\"value1\"}}]"},
+		{"TestAlert2.firing": "[{\"handlerRef\" :\"testHandler2\", \"args\": {\"key2\":\"value2\"}}]"},
+	}
+	expectedWorkflowMap := map[string][]v1.AutomationStep{
+		"TestAlert1.firing": {
+			{
+				HandlerRef: "testHandler1",
+				Arguments:  map[string]string{"key1": "value1"},
+			},
+		},
+		"TestAlert2.firing": {
+			{
+				HandlerRef: "testHandler2",
+				Arguments:  map[string]string{"key2": "value2"},
+			},
+		},
+	}
+	workflowMap := getWorkflowMap(steps)
+	assert.Equal(t, expectedWorkflowMap, workflowMap)
+}
+
+func TestGetWorkflowMap_InvalidStepsJson(t *testing.T) {
+	steps := []map[string]string{
+		{"TestAlert1.firing": "[{\"hhhhandlerRef\" :\"testHandler1\", \"aaaargs\": {\"key1\":\"value1\"}}]"},
+	}
+	result := make(map[string][]v1.AutomationStep, 0)
+	workflowMap := getWorkflowMap(steps)
+	assert.Equal(t, workflowMap, result)
+}

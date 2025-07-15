@@ -83,10 +83,7 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKub
 			return err
 		}
 
-		workflowMap, err := getWorkflowMap(hubData)
-		if err != nil {
-			return fmt.Errorf("error getting workflow map for hub %s: %w", event.HubName, err)
-		}
+		workflowMap := getWorkflowMap(hubData)
 
 		var workflowFound bool
 		var steps []v1.AutomationStep
@@ -228,14 +225,16 @@ func initNatsSubscriber() (eventing.Subscriber, error) {
 	return nats.NewSubscriber(logger, "subscriber-event-hub")
 }
 
-func getWorkflowMap(hubData []map[string]string) (map[string][]v1.AutomationStep, error) {
+func getWorkflowMap(hubData []map[string]string) map[string][]v1.AutomationStep {
 	result := make(map[string][]v1.AutomationStep, len(hubData))
 
 	for _, v := range hubData {
 		for k, v := range v {
 			var workflow []v1.AutomationStep
 
-			if err := json.Unmarshal([]byte(v), &workflow); err != nil {
+			dec := json.NewDecoder(strings.NewReader(v))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&workflow); err != nil {
 				logger.Warn("could not unmarshall workflow", zap.String("key", k), zap.Error(err))
 				continue
 			}
@@ -243,5 +242,5 @@ func getWorkflowMap(hubData []map[string]string) (map[string][]v1.AutomationStep
 			result[k] = workflow
 		}
 	}
-	return result, nil
+	return result
 }
