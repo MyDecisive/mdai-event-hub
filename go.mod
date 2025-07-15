@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.2
-	github.com/decisiveai/mdai-data-core v0.1.7
+	github.com/decisiveai/mdai-data-core v0.1.9
 	github.com/decisiveai/mdai-operator v0.1.16-0.20250522133829-a3eb3bddb12b
 	github.com/google/uuid v1.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
@@ -19,9 +19,9 @@ require (
 	github.com/valkey-io/valkey-go/mock v1.0.57
 	go.uber.org/mock v0.5.2
 	go.uber.org/zap v1.27.0
-	k8s.io/api v0.33.1
-	k8s.io/apimachinery v0.33.1
-	k8s.io/client-go v0.33.1
+	k8s.io/api v0.33.2
+	k8s.io/apimachinery v0.33.2
+	k8s.io/client-go v0.33.2
 )
 
 require (

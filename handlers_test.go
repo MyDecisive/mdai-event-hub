@@ -1,11 +1,289 @@
 package main
 
 import (
+	"context"
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 	"testing"
 	"time"
 )
+
+type MockHandlerAdapter struct {
+	Calls map[string][]map[string]string
+}
+
+func (mh *MockHandlerAdapter) AddElementToSet(ctx context.Context, variableKey string, hubName string, value string, correlationId string) error {
+	mh.Calls["AddElementToSet"] = append(mh.Calls["AddElementToSet"], map[string]string{
+		"variableKey":   variableKey,
+		"hubName":       hubName,
+		"value":         value,
+		"correlationId": correlationId,
+	})
+	return nil
+}
+
+func (mh *MockHandlerAdapter) RemoveElementFromSet(ctx context.Context, variableKey string, hubName string, value string, correlationId string) error {
+	mh.Calls["RemoveElementFromSet"] = append(mh.Calls["RemoveElementFromSet"], map[string]string{
+		"variableKey":   variableKey,
+		"hubName":       hubName,
+		"value":         value,
+		"correlationId": correlationId,
+	})
+	return nil
+}
+
+func (mh *MockHandlerAdapter) AddSetMapElement(ctx context.Context, variableKey string, hubName string, field string, value string, correlationId string) error {
+	mh.Calls["AddSetMapElement"] = append(mh.Calls["AddSetMapElement"], map[string]string{
+		"variableKey":   variableKey,
+		"hubName":       hubName,
+		"field":         field,
+		"value":         value,
+		"correlationId": correlationId,
+	})
+	return nil
+}
+
+func (mh *MockHandlerAdapter) RemoveElementFromMap(ctx context.Context, variableKey string, hubName string, field string, correlationId string) error {
+	mh.Calls["RemoveElementFromMap"] = append(mh.Calls["RemoveElementFromMap"], map[string]string{
+		"variableKey":   variableKey,
+		"hubName":       hubName,
+		"field":         field,
+		"correlationId": correlationId,
+	})
+	return nil
+}
+
+func (mh *MockHandlerAdapter) SetStringValue(ctx context.Context, variableKey string, hubName string, value string, correlationId string) error {
+	mh.Calls["SetStringValue"] = append(mh.Calls["SetStringValue"], map[string]string{
+		"variableKey":   variableKey,
+		"hubName":       hubName,
+		"value":         value,
+		"correlationId": correlationId,
+	})
+	return nil
+}
+
+func TestHandleAddNoisyServiceToSet(t *testing.T) {
+	mockHandlerAdapter := &MockHandlerAdapter{
+		Calls: make(map[string][]map[string]string),
+	}
+	mdaiInterface := MdaiInterface{
+		logger: zap.NewNop(),
+		data:   mockHandlerAdapter,
+	}
+	event := eventing.MdaiEvent{
+		Id:            "testId",
+		Name:          "testName",
+		Payload:       `{"key":"bazfoo"}`,
+		Source:        "testSource",
+		SourceId:      "testSourceId",
+		CorrelationId: "bob",
+		HubName:       "barbaz",
+	}
+	args := map[string]string{
+		"variable_ref":    "foobar",
+		"payload_val_ref": "key",
+	}
+	assert.NoError(t, handleAddNoisyServiceToSet(mdaiInterface, event, args))
+	assert.Contains(t, mockHandlerAdapter.Calls["AddElementToSet"], map[string]string{
+		"variableKey":   "foobar",
+		"hubName":       "barbaz",
+		"value":         "bazfoo",
+		"correlationId": "bob",
+	})
+}
+
+func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
+	mockHandlerAdapter := &MockHandlerAdapter{
+		Calls: make(map[string][]map[string]string),
+	}
+	mdaiInterface := MdaiInterface{
+		logger: zap.NewNop(),
+		data:   mockHandlerAdapter,
+	}
+	event := eventing.MdaiEvent{
+		Id:            "testId",
+		Name:          "testName",
+		Payload:       `{"key":"bazfoo"}`,
+		Source:        "testSource",
+		SourceId:      "testSourceId",
+		CorrelationId: "bob",
+		HubName:       "barbaz",
+	}
+	args := map[string]string{
+		"variable_ref":    "foobar",
+		"payload_val_ref": "key",
+	}
+	assert.NoError(t, handleRemoveNoisyServiceFromSet(mdaiInterface, event, args))
+	assert.Contains(t, mockHandlerAdapter.Calls["RemoveElementFromSet"], map[string]string{
+		"variableKey":   "foobar",
+		"hubName":       "barbaz",
+		"value":         "bazfoo",
+		"correlationId": "bob",
+	})
+}
+
+func TestHandleManualVariablesActions(t *testing.T) {
+	testCases := []struct {
+		description string
+		event       eventing.MdaiEvent
+		args        map[string]string
+		handlerName string
+		expected    map[string]string
+	}{
+		{
+			description: "add set member operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"set","operation":"add","variableRef":"foobar", "data": ["bazfoo"]}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "AddElementToSet",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"value":         "bazfoo",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "remove set member operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"set","operation":"remove","variableRef":"foobar", "data": ["bazfoo"]}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "RemoveElementFromSet",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"value":         "bazfoo",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "add map member operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"map","operation":"add","variableRef":"foobar", "data": {"argh": "blargh"}}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "AddSetMapElement",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"field":         "argh",
+				"value":         "blargh",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "remove map member operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"map","operation":"remove","variableRef":"foobar", "data": ["bazfoo"]}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "RemoveElementFromMap",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"field":         "bazfoo",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "set string operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"string","variableRef":"foobar", "data": "bazfoo"}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "SetStringValue",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"value":         "bazfoo",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "set int operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"int","variableRef":"foobar", "data": "3"}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "SetStringValue",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"value":         "3",
+				"correlationId": "bob",
+			},
+		},
+		{
+			description: "set bool operation",
+			event: eventing.MdaiEvent{
+				Id:            "testId",
+				Name:          "testName",
+				Payload:       `{"dataType":"boolean","variableRef":"foobar", "data": "false"}`,
+				Source:        "testSource",
+				SourceId:      "testSourceId",
+				CorrelationId: "bob",
+				HubName:       "barbaz",
+			},
+			handlerName: "SetStringValue",
+			expected: map[string]string{
+				"variableKey":   "foobar",
+				"hubName":       "barbaz",
+				"value":         "false",
+				"correlationId": "bob",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			t.Parallel()
+			mockHandlerAdapter := &MockHandlerAdapter{
+				Calls: make(map[string][]map[string]string),
+			}
+			mdaiInterface := MdaiInterface{
+				logger: zap.NewNop(),
+				data:   mockHandlerAdapter,
+			}
+			assert.NoError(t, handleManualVariablesActions(t.Context(), mdaiInterface, tc.event))
+			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
+		})
+	}
+
+}
 
 func TestBuildSlackPayload(t *testing.T) {
 	t.Parallel()

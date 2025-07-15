@@ -87,11 +87,11 @@ func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, a
 
 	switch comp {
 	case "firing":
-		if err = mdai.data.AddElementToSet(ctx, variableRef, event.HubName, payloadValue); err != nil {
+		if err = mdai.data.AddElementToSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationId); err != nil {
 			return err
 		}
 	case "resolved":
-		if err = mdai.data.RemoveElementFromSet(ctx, variableRef, event.HubName, payloadValue); err != nil {
+		if err = mdai.data.RemoveElementFromSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationId); err != nil {
 			return err
 		}
 	default:
@@ -116,7 +116,7 @@ func handleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, ar
 		return fmt.Errorf("failed to get payload value key: %w", err)
 	}
 
-	if err := mdai.data.AddElementToSet(ctx, variableRef, event.HubName, value); err != nil {
+	if err := mdai.data.AddElementToSet(ctx, variableRef, event.HubName, value, event.CorrelationId); err != nil {
 		return err
 	}
 	// TODO: Debug Log new var val
@@ -140,7 +140,7 @@ func handleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEven
 		return fmt.Errorf("failed to get payload value key: %w", err)
 	}
 
-	if err := mdai.data.RemoveElementFromSet(ctx, variableRef, event.HubName, value); err != nil {
+	if err := mdai.data.RemoveElementFromSet(ctx, variableRef, event.HubName, value, event.CorrelationId); err != nil {
 		return err
 	}
 	// TODO: Debug Log new var val
@@ -154,6 +154,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 		return err
 	}
 	mdai.logger.Info("Received static variable payload", zap.Any("Value", payloadObj.Data))
+	correlationId := event.CorrelationId
 	switch payloadObj.DataType {
 	case "set":
 		values, ok := payloadObj.Data.([]any)
@@ -166,7 +167,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				{
 					for _, val := range values {
 						mdai.logger.Info("Setting value", zap.String("Value", val.(string)))
-						if err := mdai.data.AddElementToSet(ctx, payloadObj.VariableRef, event.HubName, val.(string)); err != nil {
+						if err := mdai.data.AddElementToSet(ctx, payloadObj.VariableRef, event.HubName, val.(string), correlationId); err != nil {
 							return err
 						}
 					}
@@ -175,7 +176,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				{
 					for _, val := range values {
 						mdai.logger.Info("Setting value", zap.String("Value", val.(string)))
-						if err := mdai.data.RemoveElementFromSet(ctx, payloadObj.VariableRef, event.HubName, val.(string)); err != nil {
+						if err := mdai.data.RemoveElementFromSet(ctx, payloadObj.VariableRef, event.HubName, val.(string), correlationId); err != nil {
 							return err
 						}
 					}
@@ -193,7 +194,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 					}
 					for key, val := range values {
 						mdai.logger.Info("Setting value", zap.String("Field", key), zap.String("Value", val.(string)))
-						if err := mdai.data.AddSetMapElement(ctx, payloadObj.VariableRef, event.HubName, key, val.(string)); err != nil {
+						if err := mdai.data.AddSetMapElement(ctx, payloadObj.VariableRef, event.HubName, key, val.(string), correlationId); err != nil {
 							return err
 						}
 					}
@@ -206,7 +207,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 					}
 					for _, key := range values {
 						mdai.logger.Info("Deleting  field", zap.String("Field", key.(string)))
-						if err := mdai.data.RemoveElementFromMap(ctx, payloadObj.VariableRef, event.HubName, key.(string)); err != nil {
+						if err := mdai.data.RemoveElementFromMap(ctx, payloadObj.VariableRef, event.HubName, key.(string), correlationId); err != nil {
 							return err
 						}
 					}
@@ -220,7 +221,7 @@ func handleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				return fmt.Errorf("data should be a string")
 			}
 			mdai.logger.Info("Setting string", zap.String("value", value))
-			if err := mdai.data.SetStringValue(ctx, payloadObj.VariableRef, event.HubName, value); err != nil {
+			if err := mdai.data.SetStringValue(ctx, payloadObj.VariableRef, event.HubName, value, correlationId); err != nil {
 				return err
 			}
 		}
