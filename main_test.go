@@ -6,12 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 	"github.com/stretchr/testify/assert"
 	valkeyMock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // Mock handler for testing
@@ -31,35 +35,44 @@ func TestProcessEvent_Success(t *testing.T) {
 
 	mockClient := valkeyMock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := NewMockConfigMapManager()
 
-	testHandlerCalled = false
-	testHandlerError = nil
-
-	originalHandlers := SupportedHandlers
-	SupportedHandlers = map[HandlerName]HandlerFunc{
-		"testHandler": testHandler,
-	}
-	defer func() { SupportedHandlers = originalHandlers }()
-
-	workflowMap := map[string][]v1.AutomationStep{
-		"TestAlert.firing": {
-			{
-				HandlerRef: "testHandler",
-				Arguments:  map[string]string{"key": "value"},
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-hub-automation",
+			Labels: map[string]string{
+				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
+				dcoreKube.LabelMdaiHubName:   "test-hub",
 			},
+		},
+		Data: map[string]string{
+			"TestAlert.firing": "[{\"handlerRef\" :\"testHandler\", \"args\": {\"key\":\"value\"}}]",
 		},
 	}
 
-	mockConfigMgr.SetConfig("test-hub", workflowMap)
+	clientset := fake.NewClientset(configMap)
+	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
+
+	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	if err != nil {
+		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
+	}
+	if err := cmController.Run(); err != nil {
+		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
+	}
+
+	testHandlerCalled = false
+	testHandlerError = nil
 
 	event := eventing.MdaiEvent{
 		HubName: "test-hub",
 		Name:    "TestAlert.firing",
 	}
+	SupportedHandlers = map[HandlerName]HandlerFunc{
+		"testHandler": testHandler,
+	}
 
-	handler := ProcessEvent(ctx, mockClient, mockConfigMgr, logger, nil)
-	err := handler(event)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
+	err = handler(event)
 
 	assert.NoError(t, err)
 	assert.True(t, testHandlerCalled)
@@ -73,14 +86,44 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 
 	mockClient := valkeyMock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := NewMockConfigMapManager()
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-hub-automation",
+			Labels: map[string]string{
+				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
+				dcoreKube.LabelMdaiHubName:   "test-hub",
+			},
+		},
+		Data: map[string]string{
+			"TestAlert.firing": "[{\"handlerRef\" :\"testHandler\", \"args\": {\"key\":\"value\"}}]",
+		},
+	}
+
+	clientset := fake.NewClientset(configMap)
+	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
+
+	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	if err != nil {
+		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
+	}
+	if err := cmController.Run(); err != nil {
+		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
+	}
+	defer cmController.Stop()
+
+	testHandlerCalled = false
+	testHandlerError = nil
 
 	event := eventing.MdaiEvent{
 		Name: "TestAlert.firing",
 	}
+	SupportedHandlers = map[HandlerName]HandlerFunc{
+		"testHandler": testHandler,
+	}
 
-	handler := ProcessEvent(ctx, mockClient, mockConfigMgr, logger, nil)
-	err := handler(event)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
+	err = handler(event)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no hub name provided")
@@ -94,34 +137,45 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 
 	mockClient := valkeyMock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := NewMockConfigMapManager()
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-hub-automation",
+			Labels: map[string]string{
+				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
+				dcoreKube.LabelMdaiHubName:   "test-hub",
+			},
+		},
+		Data: map[string]string{
+			"TestAlert": "[{\"handlerRef\" :\"testHandler\", \"args\": {\"key\":\"value\"}}]",
+		},
+	}
+
+	clientset := fake.NewClientset(configMap)
+	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
+
+	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	if err != nil {
+		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
+	}
+	if err := cmController.Run(); err != nil {
+		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
+	}
+	defer cmController.Stop()
 
 	testHandlerCalled = false
 	testHandlerError = nil
-
-	originalHandlers := SupportedHandlers
-	SupportedHandlers = map[HandlerName]HandlerFunc{
-		"testHandler": testHandler,
-	}
-	defer func() { SupportedHandlers = originalHandlers }()
-
-	workflowMap := map[string][]v1.AutomationStep{
-		"TestAlert": {
-			{
-				HandlerRef: "testHandler",
-				Arguments:  map[string]string{"key": "value"},
-			},
-		},
-	}
-	mockConfigMgr.SetConfig("test-hub", workflowMap)
 
 	event := eventing.MdaiEvent{
 		HubName: "test-hub",
 		Name:    "TestAlert.firing",
 	}
+	SupportedHandlers = map[HandlerName]HandlerFunc{
+		"testHandler": testHandler,
+	}
 
-	handler := ProcessEvent(ctx, mockClient, mockConfigMgr, logger, nil)
-	err := handler(event)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
+	err = handler(event)
 
 	assert.NoError(t, err)
 	assert.True(t, testHandlerCalled)
@@ -135,17 +189,39 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 
 	mockClient := valkeyMock.NewClient(ctrl)
 	logger := zap.NewNop()
-	mockConfigMgr := NewMockConfigMapManager()
 
-	mockConfigMgr.SetConfig("test-hub", map[string][]v1.AutomationStep{})
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-hub-automation",
+			Labels: map[string]string{
+				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
+				dcoreKube.LabelMdaiHubName:   "test-hub",
+			},
+		},
+	}
+
+	clientset := fake.NewClientset(configMap)
+	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
+
+	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	if err != nil {
+		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
+	}
+	if err := cmController.Run(); err != nil {
+		logger.Fatal("failed to run ConfigMap controller", zap.Error(err))
+	}
+	defer cmController.Stop()
+
+	testHandlerCalled = false
+	testHandlerError = nil
 
 	event := eventing.MdaiEvent{
 		HubName: "test-hub",
 		Name:    "UnknownAlert.firing",
 	}
 
-	handler := ProcessEvent(ctx, mockClient, mockConfigMgr, logger, nil)
-	err := handler(event)
+	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
+	err = handler(event)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no configured automation for event: UnknownAlert.firing")
@@ -276,4 +352,36 @@ func TestProcessEventPayload_InvalidJSON(t *testing.T) {
 	assert.Nil(t, result, "expected result to be nil on invalid JSON")
 	assert.Error(t, err, "expected an error for invalid JSON payload")
 	assert.Contains(t, err.Error(), "failed to unmarshal payload")
+}
+
+func TestGetWorkflowMap(t *testing.T) {
+	steps := []map[string]string{
+		{"TestAlert1.firing": "[{\"handlerRef\" :\"testHandler1\", \"args\": {\"key1\":\"value1\"}}]"},
+		{"TestAlert2.firing": "[{\"handlerRef\" :\"testHandler2\", \"args\": {\"key2\":\"value2\"}}]"},
+	}
+	expectedWorkflowMap := map[string][]v1.AutomationStep{
+		"TestAlert1.firing": {
+			{
+				HandlerRef: "testHandler1",
+				Arguments:  map[string]string{"key1": "value1"},
+			},
+		},
+		"TestAlert2.firing": {
+			{
+				HandlerRef: "testHandler2",
+				Arguments:  map[string]string{"key2": "value2"},
+			},
+		},
+	}
+	workflowMap := getWorkflowMap(steps)
+	assert.Equal(t, expectedWorkflowMap, workflowMap)
+}
+
+func TestGetWorkflowMap_InvalidStepsJson(t *testing.T) {
+	steps := []map[string]string{
+		{"TestAlert1.firing": "[{\"hhhhandlerRef\" :\"testHandler1\", \"aaaargs\": {\"key1\":\"value1\"}}]"},
+	}
+	result := make(map[string][]v1.AutomationStep, 0)
+	workflowMap := getWorkflowMap(steps)
+	assert.Equal(t, workflowMap, result)
 }

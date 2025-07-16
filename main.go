@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/signal"
 	"strconv"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
+	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/decisiveai/mdai-event-hub/eventing/nats"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
@@ -31,8 +35,6 @@ const (
 	valkeyPasswordEnvVarKey            = "VALKEY_PASSWORD"
 	valkeyAuditStreamExpiryMSEnvVarKey = "VALKEY_AUDIT_STREAM_EXPIRY_MS"
 	mdaiHubEventHistoryStreamName      = "mdai_hub_event_history"
-
-	automationConfigMapNamePostfix = "-automation"
 )
 
 func init() {
@@ -54,7 +56,7 @@ func init() {
 }
 
 // ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMapManagerInterface, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := MdaiInterface{
@@ -80,10 +82,12 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr ConfigMap
 			return nil
 		}
 
-		workflowMap, err := configMgr.GetConfigMapForHub(ctx, event.HubName)
+		hubData, err := configMgr.GetHubData(event.HubName)
 		if err != nil {
-			return fmt.Errorf("error getting ConfigMap for hub %s: %w", event.HubName, err)
+			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
 		}
+
+		workflowMap := getWorkflowMap(hubData)
 
 		var workflowFound bool
 		var steps []v1.AutomationStep
@@ -220,11 +224,20 @@ func main() {
 		}
 	}(subscriber)
 
-	configMgr, err := NewConfigMapManager(logger, automationConfigMapNamePostfix)
+	clientset, err := dcoreKube.NewK8sClient(logger)
+	if err != nil {
+		logger.Fatal("Failed to create k8s client", zap.Error(err))
+		return
+	}
+
+	configMgr, err := dcoreKube.NewConfigMapController(dcoreKube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
-	defer configMgr.Cleanup()
+	if err := configMgr.Run(); err != nil {
+		logger.Fatal("Failed to run  ConfigMap manager", zap.Error(err))
+	}
+	defer configMgr.Stop()
 
 	err = subscriber.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger, auditAdapter))
 	if err != nil {
@@ -260,4 +273,24 @@ func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, e
 
 func initNatsSubscriber() (eventing.Subscriber, error) {
 	return nats.NewSubscriber(logger, "subscriber-event-hub")
+}
+
+func getWorkflowMap(hubData []map[string]string) map[string][]v1.AutomationStep {
+	result := make(map[string][]v1.AutomationStep, len(hubData))
+
+	for _, v := range hubData {
+		for k, v := range v {
+			var workflow []v1.AutomationStep
+
+			dec := json.NewDecoder(strings.NewReader(v))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&workflow); err != nil {
+				logger.Warn("could not unmarshall workflow", zap.String("key", k), zap.Error(err))
+				continue
+			}
+
+			result[k] = workflow
+		}
+	}
+	return result
 }
