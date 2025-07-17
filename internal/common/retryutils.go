@@ -49,9 +49,9 @@ func RetryInitializer[T any](
 		backoff.WithBackOff(exponentialBackoff),
 		backoff.WithMaxElapsedTime(maxElapsedTime),
 		backoff.WithNotify(notifyFunc)); err != nil {
-		logger.Fatal(fmt.Sprintf("failed to initialize %s", resourceName), zap.Error(err))
+
 		var zero T
-		return zero, err
+		return zero, fmt.Errorf("failed to initialize %s: %w", resourceName, err)
 	}
 
 	return result, nil
