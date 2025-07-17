@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
 )

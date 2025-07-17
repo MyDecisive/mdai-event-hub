@@ -3,34 +3,30 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
-	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	internalvalkey "github.com/decisiveai/mdai-event-hub/internal/valkey"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
+	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	datacore "github.com/decisiveai/mdai-data-core/handlers"
-	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
-	corev1 "k8s.io/api/core/v1"
-
+	dcorekube "github.com/decisiveai/mdai-data-core/kube"
+	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	internalvalkey "github.com/decisiveai/mdai-event-hub/internal/valkey"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
-
-	"os"
-	"strings"
-
 	"github.com/valkey-io/valkey-go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
 )
 
-var (
-	logger *zap.Logger
-)
+var logger *zap.Logger
 
 const (
 	valkeyEndpointEnvVarKey            = "VALKEY_ENDPOINT"
@@ -57,8 +53,8 @@ func init() {
 	defer logger.Sync() // Flush logs before exiting
 }
 
-// ProcessEvent handles an MdaiEvent according to configured workflows
-func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
+// ProcessEvent handles an MdaiEvent according to configured workflows.
+func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcorekube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := handlers.MdaiInterface{
@@ -69,7 +65,7 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKub
 	return func(event eventing.MdaiEvent) error {
 		hubName := event.HubName
 		if hubName == "" {
-			return fmt.Errorf("no hub name provided")
+			return errors.New("no hub name provided")
 		}
 		logger.Info("Processing event for hub",
 			zap.String("hubName", event.HubName),
@@ -167,13 +163,6 @@ func safePerformAutomationStep(mdai handlers.MdaiInterface, autoStep v1.Automati
 	return fmt.Errorf("handler %s not supported", handlerName)
 }
 
-func getEnvVariableWithDefault(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
-}
-
 func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, automationStep v1.AutomationStep, automationSucceeded bool) error {
 	eventMap := map[string]string{
 		"id":                     event.Id,
@@ -226,13 +215,13 @@ func main() {
 		}
 	}(subscriber)
 
-	clientset, err := dcoreKube.NewK8sClient(logger)
+	clientset, err := dcorekube.NewK8sClient(logger)
 	if err != nil {
 		logger.Fatal("Failed to create k8s client", zap.Error(err))
 		return
 	}
 
-	configMgr, err := dcoreKube.NewConfigMapController(dcoreKube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
+	configMgr, err := dcorekube.NewConfigMapController(dcorekube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}

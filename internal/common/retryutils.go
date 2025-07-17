@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-
 	"go.uber.org/zap"
 )
 
 // RetryInitializer is a generic function to handle initialization with retry logic
-// T is the resource type being created
+// T is the resource type being created.
 func RetryInitializer[T any](
 	ctx context.Context,
 	logger *zap.Logger,
@@ -32,7 +31,7 @@ func RetryInitializer[T any](
 			retryCount++
 			return "", err
 		}
-		logger.Info(fmt.Sprintf("Successfully initialized %s", resourceName))
+		logger.Info("Successfully initialized " + resourceName)
 		return "", nil
 	}
 
@@ -49,7 +48,6 @@ func RetryInitializer[T any](
 		backoff.WithBackOff(exponentialBackoff),
 		backoff.WithMaxElapsedTime(maxElapsedTime),
 		backoff.WithNotify(notifyFunc)); err != nil {
-
 		var zero T
 		return zero, fmt.Errorf("failed to initialize %s: %w", resourceName, err)
 	}

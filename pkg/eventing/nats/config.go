@@ -3,12 +3,12 @@ package nats
 import (
 	"context"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -22,12 +22,12 @@ const (
 )
 
 type Config struct {
-	URL               string        `envconfig:"NATS_URL" default:"nats://mdai-hub-nats.mdai.svc.cluster.local:4222"`
-	Subject           string        `envconfig:"NATS_SUBJECT" default:"events"`
-	StreamName        string        `envconfig:"NATS_STREAM_NAME" default:"EVENTS_STREAM"`
-	QueueName         string        `envconfig:"NATS_QUEUE_NAME" default:"events"`
+	URL               string        `default:"nats://mdai-hub-nats.mdai.svc.cluster.local:4222" envconfig:"NATS_URL"`
+	Subject           string        `default:"events"                                           envconfig:"NATS_SUBJECT"`
+	StreamName        string        `default:"EVENTS_STREAM"                                    envconfig:"NATS_STREAM_NAME"`
+	QueueName         string        `default:"events"                                           envconfig:"NATS_QUEUE_NAME"`
 	ClientName        string        `envconfig:"-"`
-	InactiveThreshold time.Duration `envconfig:"NATS_INACTIVE_THRESHOLD" default:"1m"`
+	InactiveThreshold time.Duration `default:"1m"                                               envconfig:"NATS_INACTIVE_THRESHOLD"`
 	NatsPassword      string        `envconfig:"NATS_PASSWORD"`
 	Logger            *zap.Logger   `envconfig:"-"`
 }
@@ -123,12 +123,11 @@ func waitForNATSConnection(ctx context.Context, conn *nats.Conn, cfg Config) {
 
 	operation := func() (bool, error) {
 		// RetryFlush returns nil as soon as FlushTimeout succeeds.
-		if err := conn.FlushTimeout(250 * time.Millisecond); err == nil {
-			cfg.Logger.Info("NATS connection verified")
-			return true, nil
-		} else {
+		if err := conn.FlushTimeout(250 * time.Millisecond); err != nil {
 			return false, err
 		}
+		cfg.Logger.Info("NATS connection verified")
+		return true, nil
 	}
 
 	_, err := backoff.Retry(

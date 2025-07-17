@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 const (
@@ -20,7 +22,7 @@ const (
 // SupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
 // The handler library will have to export a map that can be dynamically accessed.
 // To enforce this, handlers are declared with a lower case first character so they
-// are not exported directly but can only be accessed through the map
+// are not exported directly but can only be accessed through the map.
 var SupportedHandlers = HandlerMap{
 	HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
 	HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
@@ -159,7 +161,7 @@ func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 	case "set":
 		values, ok := payloadObj.Data.([]any)
 		if !ok {
-			return fmt.Errorf("data should be a list of strings")
+			return errors.New("data should be a list of strings")
 		}
 		{
 			switch payloadObj.Operation {
@@ -190,7 +192,7 @@ func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				{
 					values, ok := payloadObj.Data.(map[string]any)
 					if !ok {
-						return fmt.Errorf("data should be a map[string]string")
+						return errors.New("data should be a map[string]string")
 					}
 					for key, val := range values {
 						mdai.Logger.Info("Setting value", zap.String("Field", key), zap.String("Value", val.(string)))
@@ -203,7 +205,7 @@ func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 				{
 					values, ok := payloadObj.Data.([]any)
 					if !ok {
-						return fmt.Errorf("data should be a slice of strings")
+						return errors.New("data should be a slice of strings")
 					}
 					for _, key := range values {
 						mdai.Logger.Info("Deleting  field", zap.String("Field", key.(string)))
@@ -218,7 +220,7 @@ func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 		{
 			value, ok := payloadObj.Data.(string)
 			if !ok {
-				return fmt.Errorf("data should be a string")
+				return errors.New("data should be a string")
 			}
 			mdai.Logger.Info("Setting string", zap.String("value", value))
 			if err := mdai.Data.SetStringValue(ctx, payloadObj.VariableRef, event.HubName, value, correlationId); err != nil {
@@ -237,7 +239,7 @@ type SlackPayload struct {
 func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
 	webhookURL, webhookURLExists := args["webhook_url"]
 	if !webhookURLExists || webhookURL == "" {
-		return fmt.Errorf("webhook_url is a required arg value, cannot call webhook")
+		return errors.New("webhook_url is a required arg value, cannot call webhook")
 	}
 
 	payloadData, err := ProcessEventPayload(event)
@@ -255,7 +257,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

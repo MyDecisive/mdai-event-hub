@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	natsclient "github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
@@ -38,7 +38,7 @@ func runJetStream(t *testing.T) (*server.Server, string) {
 
 func mustPublish(t *testing.T, pub *EventPublisher, ev eventing.MdaiEvent) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := pub.Publish(ctx, ev); err != nil {
 		t.Fatalf("publish: %v", err)
@@ -48,16 +48,16 @@ func mustPublish(t *testing.T, pub *EventPublisher, ev eventing.MdaiEvent) {
 func setPodName(name string) { _ = os.Setenv("POD_NAME", name) }
 
 func TestElasticGroupDelivery(t *testing.T) {
-	assert := assert.New(t)
+	assertion := assert.New(t)
 
 	srv, _ := runJetStream(t)
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(err)
+	assertion.NoError(err)
 
 	pub, err := NewPublisher(logger, "test")
-	assert.NoError(err)
+	assertion.NoError(err)
 
 	want := map[string]int{
 		"mdai-hub-second|NoisyServiceFired": 5,
@@ -78,11 +78,11 @@ func TestElasticGroupDelivery(t *testing.T) {
 	for i, id := range []string{"m1", "m2", "m3"} {
 		setPodName(id)
 		sub, err := NewSubscriber(logger, "test-subscriber-"+id)
-		assert.NoError(err, "subscriber %d", i)
-		assert.NoError(sub.Subscribe(context.Background(), handler), "subscribe %d", i)
+		assertion.NoError(err, "subscriber %d", i)
+		assertion.NoError(sub.Subscribe(t.Context(), handler), "subscribe %d", i)
 	}
 
-	for n := 0; n < 5; n++ {
+	for range 5 {
 		mustPublish(t, pub, eventing.MdaiEvent{
 			Name: "NoisyServiceFired", HubName: "mdai-hub-second",
 			Source: "tester", Payload: `{"v":1}`,
@@ -99,7 +99,7 @@ func TestElasticGroupDelivery(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	assert.Equal(want, got, "all events delivered exactly once")
+	assertion.Equal(want, got, "all events delivered exactly once")
 }
 
 // TestPartitionKeyConsistency verifies that messages with the same key
@@ -143,15 +143,15 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	setPodName("member1")
 	sub1, err := NewSubscriber(logger, "test-subscriber1")
 	assert.NoError(t, err)
-	assert.NoError(t, sub1.Subscribe(context.Background(), handler1))
+	assert.NoError(t, sub1.Subscribe(t.Context(), handler1))
 
 	setPodName("member2")
 	sub2, err := NewSubscriber(logger, "test-subscriber2")
 	assert.NoError(t, err)
-	assert.NoError(t, sub2.Subscribe(context.Background(), handler2))
+	assert.NoError(t, sub2.Subscribe(t.Context(), handler2))
 
 	const count = 5
-	for i := 0; i < count; i++ {
+	for range count {
 		for _, ev := range events {
 			mustPublish(t, pub, ev)
 		}
@@ -210,7 +210,7 @@ func TestDLQForwarding(t *testing.T) {
 	// Create a subscriber whose handler always errors
 	sub, err := NewSubscriber(logger, "test-dlq-subscriber")
 	assert.NoError(t, err)
-	err = sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
+	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
 	})
 	assert.NoError(t, err)
@@ -247,7 +247,7 @@ func TestDuplicateSuppression(t *testing.T) {
 	// Subscriber records each delivery
 	sub, err := NewSubscriber(logger, "test")
 	assert.NoError(t, err)
-	err = sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
+	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		delivered++
 		mu.Unlock()
@@ -292,7 +292,7 @@ func TestSingleActiveMember(t *testing.T) {
 		setPodName(pod)
 		sub, err := NewSubscriber(logger, "test")
 		assert.NoError(t, err)
-		assert.NoError(t, sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error { return nil }))
+		assert.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error { return nil }))
 		_ = sub.Close()
 	}
 
@@ -305,7 +305,7 @@ func TestSingleActiveMember(t *testing.T) {
 	var received []string
 	sub, err := NewSubscriber(logger, "test")
 	assert.NoError(t, err)
-	assert.NoError(t, sub.Subscribe(context.Background(), func(ev eventing.MdaiEvent) error {
+	assert.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		received = append(received, ev.Name)
 		mu.Unlock()
@@ -318,7 +318,7 @@ func TestSingleActiveMember(t *testing.T) {
 	// Publish events for two keys
 	keys := []string{"KeyA", "KeyB"}
 	const count = 5
-	for i := 0; i < count; i++ {
+	for i := range count {
 		for _, k := range keys {
 			mustPublish(t, pub, eventing.MdaiEvent{Name: k, HubName: "hub", Source: "src", Payload: fmt.Sprintf(`{"i":%d}`, i)})
 		}

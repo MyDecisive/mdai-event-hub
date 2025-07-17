@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestRetryInitializer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			logger := zap.NewNop()
 
 			result, err := RetryInitializer(
@@ -73,10 +74,10 @@ func TestRetryInitializer(t *testing.T) {
 			)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Empty(t, result)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectedResult, result)
 			}
 		})
@@ -85,7 +86,7 @@ func TestRetryInitializer(t *testing.T) {
 
 func TestRetryInitializerWithContext(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		logger := zap.NewNop()
 
 		// Cancel context after a short delay
@@ -108,14 +109,14 @@ func TestRetryInitializerWithContext(t *testing.T) {
 			time.Millisecond*10,
 		)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Empty(t, result)
 	})
 }
 
 func TestRetryInitializerWithDifferentTypes(t *testing.T) {
 	t.Run("integer type", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		logger := zap.NewNop()
 
 		initializer := func() (int, error) {
@@ -141,7 +142,7 @@ func TestRetryInitializerWithDifferentTypes(t *testing.T) {
 			ID   int
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		logger := zap.NewNop()
 
 		expected := TestStruct{Name: "test", ID: 123}
@@ -158,7 +159,7 @@ func TestRetryInitializerWithDifferentTypes(t *testing.T) {
 			time.Millisecond*10,
 		)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, expected, result)
 	})
 }

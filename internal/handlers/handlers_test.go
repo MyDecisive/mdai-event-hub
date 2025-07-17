@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
-	"testing"
-	"time"
 )
 
 type MockHandlerAdapter struct {
@@ -282,7 +283,6 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
 		})
 	}
-
 }
 
 func TestBuildSlackPayload(t *testing.T) {

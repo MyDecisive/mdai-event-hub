@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"sync"
 	"time"
 
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/synadia-io/orbit.go/pcgroups"
@@ -126,7 +126,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 	consumerConfig := jetstream.ConsumerConfig{
 		AckWait:       defaultAckWait,
 		MaxAckPending: defaultMaxAckPending,
-		//Durable:       s.cfg.DurableName,
+		// Durable:       s.cfg.DurableName,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: s.cfg.InactiveThreshold,
 	}
@@ -169,7 +169,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		case <-ctx.Done():
 		case <-s.closeCh:
 		}
-		//_ = s.subscription.Drain()
+		// _ = s.subscription.Drain()
 		s.logger.Info("shutting down subscriber")
 		s.waitGroup.Wait()
 	}()

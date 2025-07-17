@@ -3,12 +3,12 @@ package nats
 import (
 	"context"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -44,10 +44,10 @@ func TestSubjectFromEvent(t *testing.T) {
 func TestFirstNonEmpty(t *testing.T) {
 	assert.Equal(t, "first", firstNonEmpty("", "first", "second"))
 	assert.Equal(t, "second", firstNonEmpty("", "", "second"))
-	assert.Equal(t, "", firstNonEmpty("", "", ""))
+	assert.Empty(t, firstNonEmpty("", "", ""))
 }
 
-// Delay server startup to force initial connect failures
+// Delay server startup to force initial connect failures.
 func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err, "failed to pick a free port")
@@ -75,7 +75,7 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	}()
 
 	// Attempt to connect with retries
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)

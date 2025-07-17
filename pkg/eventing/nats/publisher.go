@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"time"
 
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nuid"

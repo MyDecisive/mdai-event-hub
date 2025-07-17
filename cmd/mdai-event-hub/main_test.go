@@ -1,17 +1,16 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"strings"
 	"testing"
 
-	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
+	dcorekube "github.com/decisiveai/mdai-data-core/kube"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 	"github.com/stretchr/testify/assert"
-	valkeyMock "github.com/valkey-io/valkey-go/mock"
+	"github.com/stretchr/testify/require"
+	valkeymock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -19,9 +18,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// Mock handler for testing
-var testHandlerCalled bool
-var testHandlerError error
+// Mock handler for testing.
+var (
+	testHandlerCalled bool
+	testHandlerError  error
+)
 
 func testHandler(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ map[string]string) error {
 	testHandlerCalled = true
@@ -29,20 +30,20 @@ func testHandler(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ map[string]st
 }
 
 func TestProcessEvent_Success(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-hub-automation",
 			Labels: map[string]string{
-				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
-				dcoreKube.LabelMdaiHubName:   "test-hub",
+				dcorekube.ConfigMapTypeLabel: dcorekube.ManualEnvConfigMapType,
+				dcorekube.LabelMdaiHubName:   "test-hub",
 			},
 		},
 		Data: map[string]string{
@@ -53,7 +54,7 @@ func TestProcessEvent_Success(t *testing.T) {
 	clientset := fake.NewClientset(configMap)
 	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
 
-	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	cmController, err := dcorekube.NewConfigMapController(dcorekube.ManualEnvConfigMapType, "", clientset, logger)
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
@@ -75,25 +76,25 @@ func TestProcessEvent_Success(t *testing.T) {
 	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, testHandlerCalled)
 }
 
 func TestProcessEvent_NoHubName(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-hub-automation",
 			Labels: map[string]string{
-				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
-				dcoreKube.LabelMdaiHubName:   "test-hub",
+				dcorekube.ConfigMapTypeLabel: dcorekube.ManualEnvConfigMapType,
+				dcorekube.LabelMdaiHubName:   "test-hub",
 			},
 		},
 		Data: map[string]string{
@@ -104,7 +105,7 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 	clientset := fake.NewClientset(configMap)
 	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
 
-	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	cmController, err := dcorekube.NewConfigMapController(dcorekube.ManualEnvConfigMapType, "", clientset, logger)
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
@@ -131,20 +132,20 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 }
 
 func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-hub-automation",
 			Labels: map[string]string{
-				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
-				dcoreKube.LabelMdaiHubName:   "test-hub",
+				dcorekube.ConfigMapTypeLabel: dcorekube.ManualEnvConfigMapType,
+				dcorekube.LabelMdaiHubName:   "test-hub",
 			},
 		},
 		Data: map[string]string{
@@ -155,7 +156,7 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 	clientset := fake.NewClientset(configMap)
 	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
 
-	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	cmController, err := dcorekube.NewConfigMapController(dcorekube.ManualEnvConfigMapType, "", clientset, logger)
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
@@ -178,25 +179,25 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil)
 	err = handler(event)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, testHandlerCalled)
 }
 
 func TestProcessEvent_NoWorkflowFound(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockClient := valkeyMock.NewClient(ctrl)
+	mockClient := valkeymock.NewClient(ctrl)
 	logger := zap.NewNop()
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-hub-automation",
 			Labels: map[string]string{
-				dcoreKube.ConfigMapTypeLabel: dcoreKube.ManualEnvConfigMapType,
-				dcoreKube.LabelMdaiHubName:   "test-hub",
+				dcorekube.ConfigMapTypeLabel: dcorekube.ManualEnvConfigMapType,
+				dcorekube.LabelMdaiHubName:   "test-hub",
 			},
 		},
 	}
@@ -204,7 +205,7 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 	clientset := fake.NewClientset(configMap)
 	_, _ = clientset.CoreV1().ConfigMaps("first").Create(ctx, configMap, metav1.CreateOptions{})
 
-	cmController, err := dcoreKube.NewConfigMapController(dcoreKube.ManualEnvConfigMapType, "", clientset, logger)
+	cmController, err := dcorekube.NewConfigMapController(dcorekube.ManualEnvConfigMapType, "", clientset, logger)
 	if err != nil {
 		logger.Fatal("failed to create ConfigMap controller", zap.Error(err))
 	}
@@ -254,7 +255,7 @@ func TestSafePerformAutomationStep_Success(t *testing.T) {
 
 	err := safePerformAutomationStep(mdai, autoStep, event)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, testHandlerCalled)
 }
 
@@ -308,7 +309,7 @@ func TestSafePerformAutomationStep_PanicRecovery(t *testing.T) {
 	err := safePerformAutomationStep(mdai, autoStep, event)
 	assert.Error(t, err)
 
-	expectedPrefix := fmt.Sprintf("panic in handler %s", autoStep.HandlerRef)
+	expectedPrefix := "panic in handler " + autoStep.HandlerRef
 	assert.True(
 		t,
 		strings.HasPrefix(err.Error(), expectedPrefix),
@@ -327,7 +328,7 @@ func TestProcessEventPayload_Success(t *testing.T) {
 	}
 
 	result, err := handlers.ProcessEventPayload(event)
-	assert.NoError(t, err, "expected no error for valid JSON payload")
+	require.NoError(t, err, "expected no error for valid JSON payload")
 
 	assert.Contains(t, result, "key1")
 	assert.Contains(t, result, "key2")

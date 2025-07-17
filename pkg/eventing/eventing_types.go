@@ -25,10 +25,10 @@ type Subscriber interface {
 	Close() error
 }
 
-// HandlerInvoker is a function type that processes MdaiEvents
+// HandlerInvoker is a function type that processes MdaiEvents.
 type HandlerInvoker func(event MdaiEvent) error
 
-// MdaiEvent represents an event in the system
+// MdaiEvent represents an event in the system.
 type MdaiEvent struct {
 	Id            string    `json:"id,omitempty"`
 	Name          string    `json:"name"`
@@ -83,7 +83,7 @@ func createEventUuid() string {
 	return id.String()
 }
 
-// ManualVariablesActionPayload represents a payload for static variables actions
+// ManualVariablesActionPayload represents a payload for static variables actions.
 type ManualVariablesActionPayload struct {
 	VariableRef string `json:"variableRef"`
 	DataType    string `json:"dataType"`
