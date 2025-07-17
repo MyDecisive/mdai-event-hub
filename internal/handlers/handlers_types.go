@@ -1,8 +1,8 @@
-package main
+package handlers
 
 import (
 	"context"
-	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
 )
 
@@ -13,10 +13,9 @@ type IHandlerAdapter interface {
 	RemoveElementFromMap(ctx context.Context, variableKey string, hubName string, field string, correlationId string) error
 	SetStringValue(ctx context.Context, variableKey string, hubName string, value string, correlationId string) error
 }
-
 type MdaiInterface struct {
-	logger *zap.Logger
-	data   IHandlerAdapter
+	Logger *zap.Logger
+	Data   IHandlerAdapter
 }
 
 type HandlerName string

@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"strings"
 	"testing"
 
 	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
-	"github.com/decisiveai/mdai-event-hub/eventing"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 	"github.com/stretchr/testify/assert"
 	valkeyMock "github.com/valkey-io/valkey-go/mock"
@@ -22,7 +23,7 @@ import (
 var testHandlerCalled bool
 var testHandlerError error
 
-func testHandler(_ MdaiInterface, _ eventing.MdaiEvent, _ map[string]string) error {
+func testHandler(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ map[string]string) error {
 	testHandlerCalled = true
 	return testHandlerError
 }
@@ -67,7 +68,7 @@ func TestProcessEvent_Success(t *testing.T) {
 		HubName: "test-hub",
 		Name:    "TestAlert.firing",
 	}
-	SupportedHandlers = map[HandlerName]HandlerFunc{
+	handlers.SupportedHandlers = map[handlers.HandlerName]handlers.HandlerFunc{
 		"testHandler": testHandler,
 	}
 
@@ -118,7 +119,7 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 	event := eventing.MdaiEvent{
 		Name: "TestAlert.firing",
 	}
-	SupportedHandlers = map[HandlerName]HandlerFunc{
+	handlers.SupportedHandlers = map[handlers.HandlerName]handlers.HandlerFunc{
 		"testHandler": testHandler,
 	}
 
@@ -170,7 +171,7 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 		HubName: "test-hub",
 		Name:    "TestAlert.firing",
 	}
-	SupportedHandlers = map[HandlerName]HandlerFunc{
+	handlers.SupportedHandlers = map[handlers.HandlerName]handlers.HandlerFunc{
 		"testHandler": testHandler,
 	}
 
@@ -231,14 +232,14 @@ func TestSafePerformAutomationStep_Success(t *testing.T) {
 	testHandlerCalled = false
 	testHandlerError = nil
 
-	originalHandlers := SupportedHandlers
-	SupportedHandlers = map[HandlerName]HandlerFunc{
+	originalHandlers := handlers.SupportedHandlers
+	handlers.SupportedHandlers = map[handlers.HandlerName]handlers.HandlerFunc{
 		"testHandler": testHandler,
 	}
-	defer func() { SupportedHandlers = originalHandlers }()
+	defer func() { handlers.SupportedHandlers = originalHandlers }()
 
-	mdai := MdaiInterface{
-		logger: zap.NewNop(),
+	mdai := handlers.MdaiInterface{
+		Logger: zap.NewNop(),
 	}
 
 	autoStep := v1.AutomationStep{
@@ -258,8 +259,8 @@ func TestSafePerformAutomationStep_Success(t *testing.T) {
 }
 
 func TestSafePerformAutomationStep_UnsupportedHandler(t *testing.T) {
-	mdai := MdaiInterface{
-		logger: zap.NewNop(),
+	mdai := handlers.MdaiInterface{
+		Logger: zap.NewNop(),
 	}
 
 	autoStep := v1.AutomationStep{
@@ -278,19 +279,19 @@ func TestSafePerformAutomationStep_UnsupportedHandler(t *testing.T) {
 	assert.Contains(t, err.Error(), "handler unsupportedHandler not supported")
 }
 
-func panicHandler(_ MdaiInterface, _ eventing.MdaiEvent, _ map[string]string) error {
+func panicHandler(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ map[string]string) error {
 	panic("simulated panic")
 }
 
 func TestSafePerformAutomationStep_PanicRecovery(t *testing.T) {
-	SupportedHandlers = HandlerMap{
+	handlers.SupportedHandlers = handlers.HandlerMap{
 		"panicHandler": panicHandler,
 	}
 
 	logger := zap.NewNop()
-	mdai := MdaiInterface{
-		data:   nil,
-		logger: logger,
+	mdai := handlers.MdaiInterface{
+		Data:   nil,
+		Logger: logger,
 	}
 
 	autoStep := v1.AutomationStep{
@@ -325,7 +326,7 @@ func TestProcessEventPayload_Success(t *testing.T) {
 		Payload: validJSON,
 	}
 
-	result, err := processEventPayload(event)
+	result, err := handlers.ProcessEventPayload(event)
 	assert.NoError(t, err, "expected no error for valid JSON payload")
 
 	assert.Contains(t, result, "key1")
@@ -348,7 +349,7 @@ func TestProcessEventPayload_InvalidJSON(t *testing.T) {
 		Payload: invalidJSON,
 	}
 
-	result, err := processEventPayload(event)
+	result, err := handlers.ProcessEventPayload(event)
 	assert.Nil(t, result, "expected result to be nil on invalid JSON")
 	assert.Error(t, err, "expected an error for invalid JSON payload")
 	assert.Contains(t, err.Error(), "failed to unmarshal payload")

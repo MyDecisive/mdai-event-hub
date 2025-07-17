@@ -1,8 +1,8 @@
-package main
+package handlers
 
 import (
 	"context"
-	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"testing"
@@ -69,8 +69,8 @@ func TestHandleAddNoisyServiceToSet(t *testing.T) {
 		Calls: make(map[string][]map[string]string),
 	}
 	mdaiInterface := MdaiInterface{
-		logger: zap.NewNop(),
-		data:   mockHandlerAdapter,
+		Logger: zap.NewNop(),
+		Data:   mockHandlerAdapter,
 	}
 	event := eventing.MdaiEvent{
 		Id:            "testId",
@@ -99,8 +99,8 @@ func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
 		Calls: make(map[string][]map[string]string),
 	}
 	mdaiInterface := MdaiInterface{
-		logger: zap.NewNop(),
-		data:   mockHandlerAdapter,
+		Logger: zap.NewNop(),
+		Data:   mockHandlerAdapter,
 	}
 	event := eventing.MdaiEvent{
 		Id:            "testId",
@@ -275,10 +275,10 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				Calls: make(map[string][]map[string]string),
 			}
 			mdaiInterface := MdaiInterface{
-				logger: zap.NewNop(),
-				data:   mockHandlerAdapter,
+				Logger: zap.NewNop(),
+				Data:   mockHandlerAdapter,
 			}
-			assert.NoError(t, handleManualVariablesActions(t.Context(), mdaiInterface, tc.event))
+			assert.NoError(t, HandleManualVariablesActions(t.Context(), mdaiInterface, tc.event))
 			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
 		})
 	}

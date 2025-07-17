@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	internalvalkey "github.com/decisiveai/mdai-event-hub/internal/valkey"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -14,8 +18,6 @@ import (
 	dcoreKube "github.com/decisiveai/mdai-data-core/kube"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/decisiveai/mdai-event-hub/eventing"
-	"github.com/decisiveai/mdai-event-hub/eventing/nats"
 	v1 "github.com/decisiveai/mdai-operator/api/v1"
 
 	"os"
@@ -59,9 +61,9 @@ func init() {
 func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 	dataAdapter := datacore.NewHandlerAdapter(client, logger)
 
-	mdaiInterface := MdaiInterface{
-		data:   dataAdapter,
-		logger: logger,
+	mdaiInterface := handlers.MdaiInterface{
+		Data:   dataAdapter,
+		Logger: logger,
 	}
 
 	return func(event eventing.MdaiEvent) error {
@@ -75,7 +77,7 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKub
 		)
 
 		if event.Source == eventing.ManualVariablesEventSource {
-			err := handleManualVariablesActions(ctx, mdaiInterface, event)
+			err := handlers.HandleManualVariablesActions(ctx, mdaiInterface, event)
 			if err != nil {
 				return err
 			}
@@ -138,11 +140,11 @@ func ProcessEvent(ctx context.Context, client valkey.Client, configMgr *dcoreKub
 	}
 }
 
-func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, event eventing.MdaiEvent) (err error) {
+func safePerformAutomationStep(mdai handlers.MdaiInterface, autoStep v1.AutomationStep, event eventing.MdaiEvent) (err error) {
 	// handle panics
 	defer func() {
 		if r := recover(); r != nil {
-			mdai.logger.Error(
+			mdai.Logger.Error(
 				"Panic inside automation handler",
 				zap.Any("panicValue", r),
 				zap.String("handlerRef", autoStep.HandlerRef),
@@ -154,9 +156,9 @@ func safePerformAutomationStep(mdai MdaiInterface, autoStep v1.AutomationStep, e
 		}
 	}()
 
-	handlerName := HandlerName(autoStep.HandlerRef)
+	handlerName := handlers.HandlerName(autoStep.HandlerRef)
 
-	if handlerFn, exists := SupportedHandlers[handlerName]; exists {
+	if handlerFn, exists := handlers.SupportedHandlers[handlerName]; exists {
 		if err := handlerFn(mdai, event, autoStep.Arguments); err != nil {
 			return fmt.Errorf("handler %s failed: %w", handlerName, err)
 		}
@@ -194,7 +196,7 @@ func main() {
 	defer stop()
 
 	// Initialize ValKeyClient with retry logic
-	valkeyClient, err := initValKeyClient(ctx, logger)
+	valkeyClient, err := internalvalkey.Init(ctx, logger)
 	if err != nil {
 		logger.Fatal("failed to get valkey client", zap.Error(err))
 	}
@@ -214,7 +216,7 @@ func main() {
 
 	auditAdapter := audit.NewAuditAdapter(logger, valkeyClient, valkeyAuditStreamExpiry)
 
-	subscriber, err := initNatsSubscriber()
+	subscriber, err := eventhub.Init(logger)
 	if err != nil {
 		logger.Fatal("Failed to create subscriber", zap.Error(err))
 	}
@@ -246,33 +248,6 @@ func main() {
 
 	<-ctx.Done()
 	logger.Info("Service shutting down")
-}
-
-func initValKeyClient(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
-	valKeyEndpoint := getEnvVariableWithDefault(valkeyEndpointEnvVarKey, "")
-	valkeyPassword := getEnvVariableWithDefault(valkeyPasswordEnvVarKey, "")
-
-	logger.Info(fmt.Sprintf("Initializing valkey client with endpoint %s", valKeyEndpoint))
-
-	initializer := func() (valkey.Client, error) {
-		return valkey.NewClient(valkey.ClientOption{
-			InitAddress: []string{valKeyEndpoint},
-			Password:    valkeyPassword,
-		})
-	}
-
-	return RetryInitializer(
-		ctx,
-		logger,
-		"valkey client",
-		initializer,
-		3*time.Minute,
-		5*time.Second,
-	)
-}
-
-func initNatsSubscriber() (eventing.Subscriber, error) {
-	return nats.NewSubscriber(logger, "subscriber-event-hub")
 }
 
 func getWorkflowMap(hubData []map[string]string) map[string][]v1.AutomationStep {

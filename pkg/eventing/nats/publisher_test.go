@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	natsclient "github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"

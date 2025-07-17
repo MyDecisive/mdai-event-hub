@@ -3,12 +3,12 @@ package nats
 import (
 	"context"
 	"fmt"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"

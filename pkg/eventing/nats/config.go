@@ -3,12 +3,12 @@ package nats
 import (
 	"context"
 	"fmt"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	"github.com/decisiveai/mdai-event-hub/eventing"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
