@@ -87,9 +87,11 @@ func createEventUUID() string {
 }
 
 // ManualVariablesActionPayload represents a payload for static variables actions.
+//
+//nolint:tagliatelle
 type ManualVariablesActionPayload struct {
-	VariableRef string `json:"variable_ref"`
-	DataType    string `json:"data_type"`
+	VariableRef string `json:"variableRef"`
+	DataType    string `json:"dataType"`
 	Operation   string `json:"operation"`
 	Data        any    `json:"data"`
 }

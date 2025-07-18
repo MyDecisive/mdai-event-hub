@@ -92,7 +92,7 @@ func TestHandleAddNoisyServiceToSet(t *testing.T) {
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",
 		"value":         "bazfoo",
-		"correlationId": "bob",
+		"correlationID": "bob",
 	})
 }
 
@@ -122,7 +122,7 @@ func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",
 		"value":         "bazfoo",
-		"correlationId": "bob",
+		"correlationID": "bob",
 	})
 }
 
@@ -151,7 +151,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"value":         "bazfoo",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -170,7 +170,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"value":         "bazfoo",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -190,7 +190,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"hubName":       "barbaz",
 				"field":         "argh",
 				"value":         "blargh",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -209,7 +209,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"field":         "bazfoo",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"value":         "bazfoo",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -247,7 +247,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"value":         "3",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 		{
@@ -266,7 +266,7 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				"variableKey":   "foobar",
 				"hubName":       "barbaz",
 				"value":         "false",
-				"correlationId": "bob",
+				"correlationID": "bob",
 			},
 		},
 	}
