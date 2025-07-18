@@ -11,6 +11,7 @@ import (
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -50,12 +51,16 @@ func TestFirstNonEmpty(t *testing.T) {
 // Delay server startup to force initial connect failures.
 func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
-	assert.NoError(t, err, "failed to pick a free port")
-	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, err, "failed to pick a free port")
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("expected TCP address, got %T", l.Addr())
+	}
+	port := addr.Port
 	_ = l.Close()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	url := fmt.Sprintf("nats://127.0.0.1:%d", port)
 	cfg := Config{
@@ -68,8 +73,8 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	go func() {
 		time.Sleep(1 * time.Second)
 		opts := &server.Options{JetStream: true, Port: port}
-		srv, err := server.NewServer(opts)
-		assert.NoError(t, err, "failed to create embedded NATS server")
+		srv, createServerErr := server.NewServer(opts)
+		assert.NoError(t, createServerErr, "failed to create embedded NATS server")
 		go srv.Start()
 		assert.True(t, srv.ReadyForConnections(5*time.Second), "embedded server did not start in time")
 	}()
@@ -79,7 +84,7 @@ func TestConnectRetriesUntilServerAvailable(t *testing.T) {
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)
-	assert.NoError(t, err, "Connect should succeed after retries")
+	require.NoError(t, err, "Connect should succeed after retries")
 	assert.NotNil(t, conn, "nats.Conn should not be nil")
 	assert.NotNil(t, js, "JetStream context should not be nil")
 

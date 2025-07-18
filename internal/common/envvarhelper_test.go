@@ -1,3 +1,4 @@
+//nolint:revive
 package common
 
 import (
@@ -51,12 +52,14 @@ func TestGetEnvVariableWithDefault(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up environment
-			os.Unsetenv(tt.key)
+			_ = os.Unsetenv(tt.key)
 
 			// Set environment variable if needed
 			if tt.setEnv {
-				os.Setenv(tt.key, tt.envValue)
-				defer os.Unsetenv(tt.key)
+				t.Setenv(tt.key, tt.envValue)
+				defer func() {
+					_ = os.Unsetenv(tt.key)
+				}()
 			}
 
 			result := GetEnvVariableWithDefault(tt.key, tt.defaultValue)

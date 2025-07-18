@@ -19,6 +19,7 @@ import (
 const (
 	connectTimeout = 2 * time.Second
 	reconnectWait  = 2 * time.Second
+	flushTimeout   = 250 * time.Millisecond
 )
 
 type Config struct {
@@ -36,6 +37,9 @@ const (
 	defaultAckWait       = 30 * time.Second
 	defaultMaxAckPending = 1
 	defaultDuplicates    = 2 * time.Minute
+	initialInterval      = 250 * time.Millisecond
+	maxInterval          = 60 * time.Second
+	multiplier           = 2.0
 )
 
 func LoadConfig() (Config, error) {
@@ -63,6 +67,7 @@ func subjectFromEvent(prefix string, event eventing.MdaiEvent) string {
 	}, ".")
 }
 
+//nolint:ireturn
 func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, error) {
 	natsOpts := []nats.Option{
 		nats.UserInfo("mdai", cfg.NatsPassword),
@@ -108,9 +113,9 @@ func connect(ctx context.Context, cfg Config) (*nats.Conn, jetstream.JetStream, 
 
 func waitForNATSConnection(ctx context.Context, conn *nats.Conn, cfg Config) {
 	exp := backoff.NewExponentialBackOff()
-	exp.InitialInterval = 250 * time.Millisecond
-	exp.MaxInterval = 60 * time.Second
-	exp.Multiplier = 2.0
+	exp.InitialInterval = initialInterval
+	exp.MaxInterval = maxInterval
+	exp.Multiplier = multiplier
 
 	notify := func(err error, next time.Duration) {
 		cfg.Logger.Error(
@@ -123,7 +128,7 @@ func waitForNATSConnection(ctx context.Context, conn *nats.Conn, cfg Config) {
 
 	operation := func() (bool, error) {
 		// RetryFlush returns nil as soon as FlushTimeout succeeds.
-		if err := conn.FlushTimeout(250 * time.Millisecond); err != nil {
+		if err := conn.FlushTimeout(flushTimeout); err != nil {
 			return false, err
 		}
 		cfg.Logger.Info("NATS connection verified")

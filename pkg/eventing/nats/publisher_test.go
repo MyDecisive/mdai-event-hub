@@ -13,9 +13,11 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	natsclient "github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+//nolint:gocritic
 func runJetStream(t *testing.T) (*server.Server, string) {
 	t.Helper()
 	tempDir := t.TempDir()
@@ -31,9 +33,10 @@ func runJetStream(t *testing.T) (*server.Server, string) {
 	if !ns.ReadyForConnections(5 * time.Second) {
 		t.Fatal("nats-server did not start")
 	}
-	assert.NoError(t, os.Setenv("NATS_URL", ns.ClientURL()))
+	url := ns.ClientURL()
+	t.Setenv("NATS_URL", url)
 
-	return ns, ns.ClientURL()
+	return ns, url
 }
 
 func mustPublish(t *testing.T, pub *EventPublisher, ev eventing.MdaiEvent) {
@@ -54,10 +57,10 @@ func TestElasticGroupDelivery(t *testing.T) {
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assertion.NoError(err)
+	require.NoError(t, err)
 
 	pub, err := NewPublisher(logger, "test")
-	assertion.NoError(err)
+	require.NoError(t, err)
 
 	want := map[string]int{
 		"mdai-hub-second|NoisyServiceFired": 5,
@@ -78,8 +81,8 @@ func TestElasticGroupDelivery(t *testing.T) {
 	for i, id := range []string{"m1", "m2", "m3"} {
 		setPodName(id)
 		sub, err := NewSubscriber(logger, "test-subscriber-"+id)
-		assertion.NoError(err, "subscriber %d", i)
-		assertion.NoError(sub.Subscribe(t.Context(), handler), "subscribe %d", i)
+		require.NoError(t, err, "subscriber %d", i)
+		require.NoError(t, sub.Subscribe(t.Context(), handler), "subscribe %d", i)
 	}
 
 	for range 5 {
@@ -109,10 +112,10 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pub, err := NewPublisher(logger, "test-publisher")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Define two distinct event keys
 	events := []eventing.MdaiEvent{
@@ -142,13 +145,13 @@ func TestPartitionKeyConsistency(t *testing.T) {
 
 	setPodName("member1")
 	sub1, err := NewSubscriber(logger, "test-subscriber1")
-	assert.NoError(t, err)
-	assert.NoError(t, sub1.Subscribe(t.Context(), handler1))
+	require.NoError(t, err)
+	require.NoError(t, sub1.Subscribe(t.Context(), handler1))
 
 	setPodName("member2")
 	sub2, err := NewSubscriber(logger, "test-subscriber2")
-	assert.NoError(t, err)
-	assert.NoError(t, sub2.Subscribe(t.Context(), handler2))
+	require.NoError(t, err)
+	require.NoError(t, sub2.Subscribe(t.Context(), handler2))
 
 	const count = 5
 	for range count {
@@ -189,31 +192,31 @@ func TestDLQForwarding(t *testing.T) {
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pub, err := NewPublisher(logger, "test-publisher")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Subscribe directly to the DLQ subject
 	nc, err := natsclient.Connect(url)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer func(nc *natsclient.Conn) {
-		if err := nc.Drain(); err != nil {
-			logger.Warn("failed to drain NATS connection", zap.Error(err))
+		if cloggedDrainErr := nc.Drain(); cloggedDrainErr != nil {
+			logger.Warn("failed to drain NATS connection", zap.Error(cloggedDrainErr))
 		}
 	}(nc)
 
 	dlqSubject := pub.cfg.Subject + ".dlq"
 	dlqSub, err := nc.SubscribeSync(dlqSubject)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Create a subscriber whose handler always errors
 	sub, err := NewSubscriber(logger, "test-dlq-subscriber")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Publish a single event
 	ev := eventing.MdaiEvent{Name: "FailTest", HubName: "hub", Source: "src", Payload: `{"v":42}`}
@@ -221,7 +224,7 @@ func TestDLQForwarding(t *testing.T) {
 
 	// Expect the message in DLQ
 	msg, err := dlqSub.NextMsg(5 * time.Second)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, dlqSubject, msg.Subject)
 	assert.Equal(t, "handler_error", msg.Header.Get("dlq_reason"), "reason header should reflect error type")
 	assert.Equal(t, "handler error", msg.Header.Get("dlq_error"))
@@ -236,27 +239,27 @@ func TestDuplicateSuppression(t *testing.T) {
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pub, err := NewPublisher(logger, "test")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var mu sync.Mutex
 	delivered := 0
 
 	// Subscriber records each delivery
 	sub, err := NewSubscriber(logger, "test")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		delivered++
 		mu.Unlock()
 		return nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Publish the same event twice
-	ev := eventing.MdaiEvent{Id: "dup-123", Name: "DupTest", HubName: "hub", Source: "src", Payload: `{"v":99}`}
+	ev := eventing.MdaiEvent{ID: "dup-123", Name: "DupTest", HubName: "hub", Source: "src", Payload: `{"v":99}`}
 	mustPublish(t, pub, ev)
 	time.Sleep(100 * time.Millisecond)
 	mustPublish(t, pub, ev)
@@ -281,18 +284,18 @@ func TestSingleActiveMember(t *testing.T) {
 	defer srv.Shutdown()
 
 	logger, err := zap.NewDevelopment()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pub, err := NewPublisher(logger, "test")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Register and disconnect 10 subscribers to add them to the group membership
 	for i := 1; i <= 10; i++ {
 		pod := fmt.Sprintf("member_%02d", i)
 		setPodName(pod)
-		sub, err := NewSubscriber(logger, "test")
-		assert.NoError(t, err)
-		assert.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error { return nil }))
+		sub, newSubErr := NewSubscriber(logger, "test")
+		require.NoError(t, newSubErr)
+		require.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error { return nil }))
 		_ = sub.Close()
 	}
 
@@ -304,8 +307,8 @@ func TestSingleActiveMember(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
 	sub, err := NewSubscriber(logger, "test")
-	assert.NoError(t, err)
-	assert.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
+	require.NoError(t, err)
+	require.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		received = append(received, ev.Name)
 		mu.Unlock()

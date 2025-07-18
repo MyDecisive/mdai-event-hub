@@ -1,13 +1,14 @@
+//nolint:revive
 package common
 
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -132,7 +133,7 @@ func TestRetryInitializerWithDifferentTypes(t *testing.T) {
 			time.Millisecond*10,
 		)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 42, result)
 	})
 

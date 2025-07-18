@@ -11,7 +11,7 @@ func TestApplyDefaults(t *testing.T) {
 	event := &MdaiEvent{}
 	event.ApplyDefaults()
 
-	assert.NotEmpty(t, event.Id, "expected Id to be set")
+	assert.NotEmpty(t, event.ID, "expected ID to be set")
 	assert.False(t, event.Timestamp.IsZero(), "expected Timestamp to be set")
 }
 

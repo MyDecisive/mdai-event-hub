@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 )
 
+//nolint:ireturn
 func Init(logger *zap.Logger) (eventing.Subscriber, error) {
 	return nats.NewSubscriber(logger, "subscriber-event-hub")
 }

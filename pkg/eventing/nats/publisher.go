@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	maxPCGroupMembers = 5
+)
+
 type EventPublisher struct {
 	cfg    Config
 	logger *zap.Logger
@@ -31,7 +35,7 @@ func NewPublisher(logger *zap.Logger, clientName string) (*EventPublisher, error
 	cfg.Logger = logger
 	cfg.ClientName = clientName
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), newSubscriberContextTimeout)
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)
@@ -50,15 +54,15 @@ func NewPublisher(logger *zap.Logger, clientName string) (*EventPublisher, error
 }
 
 func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent) error {
-	if event.Id == "" {
-		event.Id = nuid.Next()
+	if event.ID == "" {
+		event.ID = nuid.Next()
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
 
 	subject := subjectFromEvent(p.cfg.Subject, event)
-	p.logger.Info("Publishing event to subject", zap.String("subject", subject), zap.Any("event", event))
+	p.logger.Info("Publishing event to subject", zap.String("subject", subject), zap.Object("event", &event))
 
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -72,15 +76,15 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent) 
 			"name":        []string{event.Name},
 			"source":      []string{event.Source},
 			"hubName":     []string{event.HubName},
-			nats.MsgIdHdr: []string{event.Id},
+			nats.MsgIdHdr: []string{event.ID},
 		},
 	}
-	if event.CorrelationId != "" {
-		msg.Header.Set("correlationId", event.CorrelationId)
+	if event.CorrelationID != "" {
+		msg.Header.Set("correlationId", event.CorrelationID)
 	}
 
 	pubAck, err := p.js.PublishMsg(ctx, msg)
-	p.logger.Info("Published message", zap.Any("pubAck", pubAck))
+	p.logger.Info("Published message", zap.Reflect("pubAck", pubAck))
 	return err
 }
 
@@ -118,7 +122,7 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 			js,
 			cfg.StreamName,
 			eventing.ConsumerGroupName,
-			10, // works for 1-3 replicas, TODO make it configurable: partitions = replicas * 3  (rounded to something tidy, e.g. 10, 12, 16)
+			maxPCGroupMembers, // works for 1-3 replicas, TODO make it configurable: partitions = replicas * 3  (rounded to something tidy, e.g. 10, 12, 16)
 			"events.*.*.*",
 			[]int{1, 3}, // TODO should we change to []int{1,2,3}?
 			-1,

@@ -12,8 +12,11 @@ import (
 const (
 	valkeyEndpointEnvVarKey = "VALKEY_ENDPOINT"
 	valkeyPasswordEnvVarKey = "VALKEY_PASSWORD"
+	maxElapsedTime          = 3 * time.Minute
+	intialInterval          = 5 * time.Second
 )
 
+//nolint:ireturn
 func Init(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
 	valKeyEndpoint := common.GetEnvVariableWithDefault(valkeyEndpointEnvVarKey, "")
 	valkeyPassword := common.GetEnvVariableWithDefault(valkeyPasswordEnvVarKey, "")
@@ -32,7 +35,7 @@ func Init(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
 		logger,
 		"valkey client",
 		initializer,
-		3*time.Minute,
-		5*time.Second,
+		maxElapsedTime,
+		intialInterval,
 	)
 }

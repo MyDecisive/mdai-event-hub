@@ -1,3 +1,4 @@
+//nolint:revive
 package common
 
 import (
@@ -11,6 +12,8 @@ import (
 
 // RetryInitializer is a generic function to handle initialization with retry logic
 // T is the resource type being created.
+//
+//nolint:ireturn
 func RetryInitializer[T any](
 	ctx context.Context,
 	logger *zap.Logger,
