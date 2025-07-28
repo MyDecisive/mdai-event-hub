@@ -50,7 +50,8 @@ func TestFirstNonEmpty(t *testing.T) {
 
 // Delay server startup to force initial connect failures.
 func TestConnectRetriesUntilServerAvailable(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err, "failed to pick a free port")
 	addr, ok := l.Addr().(*net.TCPAddr)
 	if !ok {
