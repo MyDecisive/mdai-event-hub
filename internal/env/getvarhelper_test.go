@@ -1,5 +1,4 @@
-//nolint:revive
-package common
+package env
 
 import (
 	"os"
@@ -62,7 +61,7 @@ func TestGetEnvVariableWithDefault(t *testing.T) {
 				}()
 			}
 
-			result := GetEnvVariableWithDefault(tt.key, tt.defaultValue)
+			result := GetVariableWithDefault(tt.key, tt.defaultValue)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

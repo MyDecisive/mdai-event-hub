@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/internal/common"
+	"github.com/decisiveai/mdai-event-hub/internal/env"
+	"github.com/decisiveai/mdai-event-hub/internal/utils"
 	"github.com/valkey-io/valkey-go"
 	"go.uber.org/zap"
 )
@@ -18,8 +19,8 @@ const (
 
 //nolint:ireturn
 func Init(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
-	valKeyEndpoint := common.GetEnvVariableWithDefault(valkeyEndpointEnvVarKey, "")
-	valkeyPassword := common.GetEnvVariableWithDefault(valkeyPasswordEnvVarKey, "")
+	valKeyEndpoint := env.GetVariableWithDefault(valkeyEndpointEnvVarKey, "")
+	valkeyPassword := env.GetVariableWithDefault(valkeyPasswordEnvVarKey, "")
 
 	logger.Info("Initializing valkey client with endpoint " + valKeyEndpoint)
 
@@ -30,7 +31,7 @@ func Init(ctx context.Context, logger *zap.Logger) (valkey.Client, error) {
 		})
 	}
 
-	return common.RetryInitializer(
+	return utils.RetryInitializer(
 		ctx,
 		logger,
 		"valkey client",

@@ -1,5 +1,5 @@
 //nolint:revive
-package common
+package utils
 
 import (
 	"context"
