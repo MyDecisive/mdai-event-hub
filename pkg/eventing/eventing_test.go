@@ -1,6 +1,7 @@
 package eventing
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,4 +38,21 @@ func TestValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManualVariablesActionPayload_JSONMarshaling(t *testing.T) {
+	payload := ManualVariablesActionPayload{
+		VariableRef: "var1",
+		DataType:    "string",
+		Operation:   "set",
+		Data:        "value",
+	}
+
+	jsonBytes, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	var decoded ManualVariablesActionPayload
+	err = json.Unmarshal(jsonBytes, &decoded)
+	require.NoError(t, err)
+	assert.Equal(t, payload, decoded)
 }

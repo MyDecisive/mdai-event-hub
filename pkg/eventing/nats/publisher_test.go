@@ -334,3 +334,369 @@ func TestSingleActiveMember(t *testing.T) {
 	want := len(keys) * count
 	assert.Equal(t, want, total, "active subscriber should receive all %d messages, got %d", want, total)
 }
+
+func TestPublishEventIDGeneration(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-id-gen")
+	require.NoError(t, err)
+	defer func() {
+		err := pub.Close()
+		require.NoError(t, err, "failed to close pub1")
+	}()
+
+	tests := []struct {
+		name  string
+		event eventing.MdaiEvent
+		hasID bool
+		desc  string
+	}{
+		{
+			name: "generates ID when empty",
+			event: eventing.MdaiEvent{
+				Name:    "TestEvent",
+				HubName: "hub",
+				Source:  "test",
+				Payload: `{"test": true}`,
+			},
+			hasID: false,
+			desc:  "should generate ID when not provided",
+		},
+		{
+			name: "preserves existing ID",
+			event: eventing.MdaiEvent{
+				ID:      "existing-id-123",
+				Name:    "TestEvent",
+				HubName: "hub",
+				Source:  "test",
+				Payload: `{"test": true}`,
+			},
+			hasID: true,
+			desc:  "should preserve existing ID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalID := tt.event.ID
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			err := pub.Publish(ctx, tt.event)
+			require.NoError(t, err, tt.desc)
+
+			if tt.hasID {
+				assert.Equal(t, originalID, tt.event.ID, "existing ID should be preserved")
+			} else {
+				assert.Empty(t, originalID, "original event should have empty ID")
+			}
+		})
+	}
+}
+
+func TestPublishTimestampGeneration(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-timestamp")
+	require.NoError(t, err)
+	defer func() {
+		err := pub.Close()
+		require.NoError(t, err, "failed to close publisher")
+	}()
+
+	tests := []struct {
+		name    string
+		event   eventing.MdaiEvent
+		hasTime bool
+		desc    string
+	}{
+		{
+			name: "generates timestamp when zero",
+			event: eventing.MdaiEvent{
+				Name:    "TestEvent",
+				HubName: "hub",
+				Source:  "test",
+				Payload: `{"test": true}`,
+			},
+			hasTime: false,
+			desc:    "should generate timestamp when not provided",
+		},
+		{
+			name: "preserves existing timestamp",
+			event: eventing.MdaiEvent{
+				Name:      "TestEvent",
+				HubName:   "hub",
+				Source:    "test",
+				Payload:   `{"test": true}`,
+				Timestamp: time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC),
+			},
+			hasTime: true,
+			desc:    "should preserve existing timestamp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalTime := tt.event.Timestamp
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			beforePublish := time.Now().UTC()
+			err := pub.Publish(ctx, tt.event)
+			afterPublish := time.Now().UTC()
+
+			require.NoError(t, err, tt.desc)
+
+			if tt.hasTime {
+				assert.Equal(t, originalTime, tt.event.Timestamp, "existing timestamp should be preserved")
+			} else {
+				assert.True(t, originalTime.IsZero(), "original timestamp should be zero")
+				assert.True(t, beforePublish.Before(afterPublish) || beforePublish.Equal(afterPublish))
+			}
+		})
+	}
+}
+
+func TestPublishSubjectGeneration(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-subject")
+	require.NoError(t, err)
+	defer func() {
+		closeErr := pub.Close()
+		require.NoError(t, closeErr, "failed to close publisher")
+	}()
+
+	event := eventing.MdaiEvent{
+		Name:    "Test.Event",
+		HubName: "hub.name",
+		Source:  "test source",
+		Payload: `{"test": true}`,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = pub.Publish(ctx, event)
+	require.NoError(t, err)
+}
+
+func TestPublishHeaderGeneration(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-headers")
+	require.NoError(t, err)
+	defer func() {
+		err := pub.Close()
+		require.NoError(t, err, "failed to close pub")
+	}()
+
+	tests := []struct {
+		name  string
+		event eventing.MdaiEvent
+		desc  string
+	}{
+		{
+			name: "sets basic headers",
+			event: eventing.MdaiEvent{
+				ID:      "test-id",
+				Name:    "TestEvent",
+				HubName: "TestHub",
+				Source:  "TestSource",
+				Payload: `{"test": true}`,
+			},
+			desc: "should set name, source, hubName, and ID headers",
+		},
+		{
+			name: "sets correlation ID header when present",
+			event: eventing.MdaiEvent{
+				ID:            "test-id-2",
+				Name:          "TestEvent2",
+				HubName:       "TestHub2",
+				Source:        "TestSource2",
+				CorrelationID: "correlation-123",
+				Payload:       `{"test": true}`,
+			},
+			desc: "should set correlationId header when provided",
+		},
+		{
+			name: "skips correlation ID header when empty",
+			event: eventing.MdaiEvent{
+				ID:      "test-id-3",
+				Name:    "TestEvent3",
+				HubName: "TestHub3",
+				Source:  "TestSource3",
+				Payload: `{"test": true}`,
+			},
+			desc: "should not set correlationId header when empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			err := pub.Publish(ctx, tt.event)
+			require.NoError(t, err, tt.desc)
+		})
+	}
+}
+
+func TestPublishJSONSerialization(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-json")
+	require.NoError(t, err)
+	defer func() {
+		err := pub.Close()
+		require.NoError(t, err, "failed to close publisher")
+	}()
+
+	tests := []struct {
+		name    string
+		event   eventing.MdaiEvent
+		wantErr bool
+		desc    string
+	}{
+		{
+			name: "serializes valid event",
+			event: eventing.MdaiEvent{
+				ID:      "valid-id",
+				Name:    "ValidEvent",
+				HubName: "ValidHub",
+				Source:  "ValidSource",
+				Payload: `{"valid": true}`,
+			},
+			wantErr: false,
+			desc:    "should serialize valid event successfully",
+		},
+		{
+			name: "handles empty payload",
+			event: eventing.MdaiEvent{
+				ID:      "empty-payload-id",
+				Name:    "EmptyPayloadEvent",
+				HubName: "EmptyHub",
+				Source:  "EmptySource",
+				Payload: "",
+			},
+			wantErr: false,
+			desc:    "should handle empty payload",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			err := pub.Publish(ctx, tt.event)
+
+			if tt.wantErr {
+				assert.Error(t, err, tt.desc)
+			} else {
+				assert.NoError(t, err, tt.desc)
+			}
+		})
+	}
+}
+
+func TestPublisherClose(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub, err := NewPublisher(logger, "test-close")
+	require.NoError(t, err)
+
+	err = pub.Close()
+	require.NoError(t, err, "should close successfully")
+
+	err = pub.Close()
+	require.NoError(t, err, "should handle double close gracefully")
+}
+
+func TestNewPublisherConfigHandling(t *testing.T) {
+	srv, url := runJetStream(t)
+	defer srv.Shutdown()
+
+	t.Setenv("NATS_URL", url)
+	t.Setenv("NATS_SUBJECT", "custom-events")
+	t.Setenv("NATS_STREAM_NAME", "CUSTOM_STREAM")
+
+	logger := zap.NewNop()
+
+	pub, err := NewPublisher(logger, "test-config")
+	require.NoError(t, err)
+	defer func() {
+		err := pub.Close()
+		require.NoError(t, err, "failed to close publisher")
+	}()
+
+	assert.Equal(t, "custom-events", pub.cfg.Subject, "should use custom subject from env")
+	assert.Equal(t, "CUSTOM_STREAM", pub.cfg.StreamName, "should use custom stream name from env")
+	assert.Equal(t, "test-config", pub.cfg.ClientName, "should set client name")
+	assert.Equal(t, logger, pub.cfg.Logger, "should set logger")
+}
+
+func TestNewPublisherStreamCreation(t *testing.T) {
+	srv, _ := runJetStream(t)
+	defer srv.Shutdown()
+
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	pub1, err := NewPublisher(logger, "test-stream-1")
+	require.NoError(t, err, "first publisher should create stream successfully")
+	defer func() {
+		pub1CloseErr := pub1.Close()
+		require.NoError(t, pub1CloseErr, "failed to close pub1")
+	}()
+
+	pub2, err := NewPublisher(logger, "test-stream-2")
+	require.NoError(t, err, "second publisher should use existing stream")
+	defer func() {
+		pub2CloseErr := pub2.Close()
+		require.NoError(t, pub2CloseErr, "failed to close pub2")
+	}()
+
+	event := eventing.MdaiEvent{
+		Name:    "StreamTest",
+		HubName: "hub",
+		Source:  "test",
+		Payload: `{"test": true}`,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = pub1.Publish(ctx, event)
+	require.NoError(t, err, "first publisher should publish successfully")
+
+	err = pub2.Publish(ctx, event)
+	require.NoError(t, err, "second publisher should publish successfully")
+}
