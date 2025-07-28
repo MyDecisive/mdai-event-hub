@@ -7,14 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/eventing"
+	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/synadia-io/orbit.go/pcgroups"
 	"go.uber.org/zap"
 )
 
-const dlqSuffix = ".dlq"
+const (
+	dlqSuffix                   = ".dlq"
+	newSubscriberContextTimeout = 5 * time.Minute
+	subscribeContextTimeout     = 5 * time.Second
+)
 
 type EventSubscriber struct {
 	cfg       Config
@@ -24,7 +28,7 @@ type EventSubscriber struct {
 	waitGroup sync.WaitGroup
 	closeCh   chan struct{}
 	closeOnce sync.Once
-	memberId  string
+	memberID  string
 }
 
 func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, error) {
@@ -36,7 +40,7 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 	cfg.Logger = logger
 	cfg.ClientName = clientName
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), newSubscriberContextTimeout)
 	defer cancel()
 
 	conn, js, err := connect(ctx, cfg)
@@ -55,78 +59,20 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 		conn:      conn,
 		jetStream: js,
 		closeCh:   make(chan struct{}),
-		memberId:  getMemberIDs(),
+		memberID:  getMemberIDs(),
 	}, nil
 }
 
 func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.HandlerInvoker) error {
 	dlqSubject := s.cfg.Subject + dlqSuffix
 	handler := func(msg jetstream.Msg) {
-		s.waitGroup.Add(1)
-		defer s.waitGroup.Done()
-
-		if metadata, _ := msg.Metadata(); metadata != nil {
-			s.logger.Info("delivery attempt",
-				zap.Uint64("consumer_seq", metadata.Sequence.Consumer),
-				zap.Uint64("stream_seq", metadata.Sequence.Stream))
-		}
-
-		forwardToDLQ := func(reason string, err error) bool {
-			// copy headers so we don’t mutate the in-flight message
-			header := nats.Header{}
-			for k, vv := range msg.Headers() {
-				header[k] = append([]string(nil), vv...)
-			}
-			header.Set("dlq_reason", reason)
-			header.Set("dlq_error", err.Error())
-
-			dlq := &nats.Msg{
-				Subject: dlqSubject,
-				Data:    msg.Data(),
-				Header:  header,
-			}
-
-			ctxDLQ, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if _, pubErr := s.jetStream.PublishMsg(ctxDLQ, dlq); pubErr != nil {
-				s.logger.Error("publish DLQ failed", zap.Error(pubErr))
-				return false
-			}
-
-			s.logger.Warn("sent message to DLQ",
-				zap.String("dlq_subject", dlqSubject),
-				zap.String("reason", reason),
-				zap.Int("bytes", len(msg.Data())))
-			return true
-		}
-
-		var event eventing.MdaiEvent
-		if err := json.Unmarshal(msg.Data(), &event); err != nil {
-			s.logger.Error("unmarshal", zap.Error(err))
-			if forwardToDLQ("json_unmarshal_error", err) {
-				_ = msg.Ack()
-			} else {
-				_ = msg.Nak()
-			}
-			return
-		}
-
-		if err := invoker(event); err != nil {
-			s.logger.Error("handler", zap.Error(err))
-			if forwardToDLQ("handler_error", err) {
-				_ = msg.Ack()
-			} else {
-				_ = msg.Nak()
-			}
-			return
-		}
-		_ = msg.Ack()
+		s.handleMessage(ctx, msg, dlqSubject, invoker)
 	}
 
 	consumerConfig := jetstream.ConsumerConfig{
 		AckWait:       defaultAckWait,
 		MaxAckPending: defaultMaxAckPending,
-		//Durable:       s.cfg.DurableName,
+		// Durable:       s.cfg.DurableName,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: s.cfg.InactiveThreshold,
 	}
@@ -136,7 +82,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		return fmt.Errorf("get Elastic Consumer Group config: %w", err)
 	}
 
-	memberID := s.memberId
+	memberID := s.memberID
 	if !ec.IsInMembership(memberID) {
 		members, err := pcgroups.AddMembers(
 			ctx,
@@ -148,7 +94,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		if err != nil {
 			return err
 		}
-		s.logger.Info("Subscribed with member ID", zap.String("memberID", memberID), zap.Any("members", members))
+		s.logger.Info("Subscribed with member ID", zap.String("memberID", memberID), zap.Reflect("members", members))
 	}
 
 	if _, err := pcgroups.ElasticConsume(
@@ -169,7 +115,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		case <-ctx.Done():
 		case <-s.closeCh:
 		}
-		//_ = s.subscription.Drain()
+
 		s.logger.Info("shutting down subscriber")
 		s.waitGroup.Wait()
 	}()
@@ -185,12 +131,12 @@ func (s *EventSubscriber) Close() error {
 			s.jetStream,
 			s.cfg.StreamName,
 			eventing.ConsumerGroupName,
-			[]string{s.memberId},
+			[]string{s.memberID},
 		)
 		if dropErr != nil {
-			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.String("memberId", s.memberId), zap.Strings("members", members))
+			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.String("memberID", s.memberID), zap.Strings("members", members))
 		} else {
-			s.logger.Info("deregistered from elastic group", zap.String("memberId", s.memberId), zap.Strings("members", members))
+			s.logger.Info("deregistered from elastic group", zap.String("memberID", s.memberID), zap.Strings("members", members))
 		}
 
 		close(s.closeCh)
@@ -199,6 +145,68 @@ func (s *EventSubscriber) Close() error {
 		}
 	})
 	return err
+}
+
+func (s *EventSubscriber) handleMessage(ctx context.Context, msg jetstream.Msg, dlqSubject string, invoker eventing.HandlerInvoker) {
+	s.waitGroup.Add(1)
+	defer s.waitGroup.Done()
+
+	if metadata, _ := msg.Metadata(); metadata != nil {
+		s.logger.Info("delivery attempt",
+			zap.Uint64("consumer_seq", metadata.Sequence.Consumer),
+			zap.Uint64("stream_seq", metadata.Sequence.Stream))
+	}
+
+	forwardToDLQ := func(reason string, err error) bool {
+		// copy headers so we don't mutate the in-flight message
+		header := nats.Header{}
+		for k, vv := range msg.Headers() {
+			header[k] = append([]string(nil), vv...)
+		}
+		header.Set("dlq_reason", reason)
+		header.Set("dlq_error", err.Error())
+
+		dlq := &nats.Msg{
+			Subject: dlqSubject,
+			Data:    msg.Data(),
+			Header:  header,
+		}
+
+		ctxDLQ, cancel := context.WithTimeout(ctx, subscribeContextTimeout)
+		defer cancel()
+		if _, pubErr := s.jetStream.PublishMsg(ctxDLQ, dlq); pubErr != nil {
+			s.logger.Error("publish DLQ failed", zap.Error(pubErr))
+			return false
+		}
+
+		s.logger.Warn("sent message to DLQ",
+			zap.String("dlq_subject", dlqSubject),
+			zap.String("reason", reason),
+			zap.Int("bytes", len(msg.Data())))
+		return true
+	}
+
+	var event eventing.MdaiEvent
+	if err := json.Unmarshal(msg.Data(), &event); err != nil {
+		s.logger.Error("unmarshal", zap.Error(err))
+		if forwardToDLQ("json_unmarshal_error", err) {
+			_ = msg.Ack()
+		} else {
+			_ = msg.Nak()
+		}
+		return
+	}
+
+	if err := invoker(event); err != nil {
+		s.logger.Error("handler", zap.Error(err))
+		if forwardToDLQ("handler_error", err) {
+			_ = msg.Ack()
+		} else {
+			_ = msg.Nak()
+		}
+		return
+	}
+	_ = msg.Ack()
 }
 
 var _ eventing.Subscriber = (*EventSubscriber)(nil)

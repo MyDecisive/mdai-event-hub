@@ -16,45 +16,48 @@ const (
 )
 
 type Publisher interface {
-	Publish(context.Context, MdaiEvent) error
+	Publish(ctx context.Context, event MdaiEvent) error
 	Close() error
 }
 
 type Subscriber interface {
-	Subscribe(context.Context, HandlerInvoker) error
+	Subscribe(ctx context.Context, invoker HandlerInvoker) error
 	Close() error
 }
 
-// HandlerInvoker is a function type that processes MdaiEvents
+// HandlerInvoker is a function type that processes MdaiEvents.
 type HandlerInvoker func(event MdaiEvent) error
 
-// MdaiEvent represents an event in the system
+// MdaiEvent represents an event in the system.
 type MdaiEvent struct {
-	Id            string    `json:"id,omitempty"`
+	ID            string    `json:"id,omitempty"`
 	Name          string    `json:"name"`
 	Timestamp     time.Time `json:"timestamp,omitempty"`
 	Payload       string    `json:"payload"`
 	Source        string    `json:"source"`
-	SourceId      string    `json:"sourceId"`
-	CorrelationId string    `json:"correlationId,omitempty"`
-	HubName       string    `json:"hubName"`
+	SourceID      string    `json:"source_id"`
+	CorrelationID string    `json:"correlation_id,omitempty"`
+	HubName       string    `json:"hub_name"`
 }
 
+// MarshalLogObject signature requires it to return an error, but there's no way the code will generate one.
+//
+//nolint:unparam
 func (mdaiEvent *MdaiEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("name", mdaiEvent.Name)
-	enc.AddString("id", mdaiEvent.Id)
+	enc.AddString("id", mdaiEvent.ID)
 	enc.AddString("source", mdaiEvent.Source)
-	enc.AddString("source_id", mdaiEvent.SourceId)
+	enc.AddString("source_id", mdaiEvent.SourceID)
 	enc.AddString("hub_name", mdaiEvent.HubName)
 	enc.AddString("payload", mdaiEvent.Payload)
 	enc.AddTime("timestamp", mdaiEvent.Timestamp)
-	enc.AddString("correlation_id", mdaiEvent.CorrelationId)
+	enc.AddString("correlation_id", mdaiEvent.CorrelationID)
 	return nil
 }
 
 func (mdaiEvent *MdaiEvent) ApplyDefaults() {
-	if mdaiEvent.Id == "" {
-		mdaiEvent.Id = createEventUuid()
+	if mdaiEvent.ID == "" {
+		mdaiEvent.ID = createEventUUID()
 	}
 	if mdaiEvent.Timestamp.IsZero() {
 		mdaiEvent.Timestamp = time.Now()
@@ -78,12 +81,14 @@ func (mdaiEvent *MdaiEvent) Validate() error {
 	return nil
 }
 
-func createEventUuid() string {
+func createEventUUID() string {
 	id := uuid.New()
 	return id.String()
 }
 
-// ManualVariablesActionPayload represents a payload for static variables actions
+// ManualVariablesActionPayload represents a payload for static variables actions.
+//
+//nolint:tagliatelle
 type ManualVariablesActionPayload struct {
 	VariableRef string `json:"variableRef"`
 	DataType    string `json:"dataType"`
