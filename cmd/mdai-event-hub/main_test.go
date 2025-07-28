@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
@@ -395,4 +398,22 @@ func TestGetWorkflowMap_InvalidStepsJson(t *testing.T) {
 	result := make(map[string][]operator.AutomationStep, 0)
 	workflowMap := getWorkflowMap(zap.NewNop(), steps)
 	assert.Equal(t, workflowMap, result)
+}
+
+func TestMain_CustomValkeyExpiryEnvVar(t *testing.T) {
+	key := valkeyAuditStreamExpiryMSEnvVarKey
+	t.Setenv(key, "86400000") // 1 day in ms
+
+	expiryMsStr := os.Getenv(key)
+	ms, err := strconv.Atoi(expiryMsStr)
+	require.NoError(t, err)
+
+	expiry := time.Duration(ms) * time.Millisecond
+	assert.Equal(t, 24*time.Hour, expiry)
+}
+
+func TestCreateLogger(t *testing.T) {
+	logger := createLogger()
+	assert.NotNil(t, logger)
+	logger.Info("test message") // No crash = pass
 }
