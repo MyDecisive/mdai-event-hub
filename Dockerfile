@@ -4,7 +4,7 @@ ARG TARGETARCH
 WORKDIR /opt/mdai-event-hub
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-w -s" -o /mdai-event-hub .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-w -s" -o /mdai-event-hub ./cmd/mdai-event-hub
 
 FROM gcr.io/distroless/static-debian12
 WORKDIR /
