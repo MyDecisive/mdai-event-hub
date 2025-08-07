@@ -213,7 +213,7 @@ func (s *EventSubscriber) handleMessage(ctx context.Context, msg jetstream.Msg, 
 		ctxDLQ, cancel := context.WithTimeout(ctx, subscribeContextTimeout)
 		defer cancel()
 		if _, pubErr := s.jetStream.PublishMsg(ctxDLQ, dlq); pubErr != nil {
-			s.logger.Error("publish DLQ failed", zap.Error(pubErr))
+			s.logger.Error("publish DLQ failed", zap.Error(pubErr), zap.String("dlq_subject", dlqSubject))
 			return false
 		}
 

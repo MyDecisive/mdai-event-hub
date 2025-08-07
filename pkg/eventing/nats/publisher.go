@@ -72,7 +72,7 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent, 
 	}
 
 	fullSubject := addPrefixToSubject(p.cfg.Subject, subject)
-	p.logger.Info("Publishing event to subject", zap.String("subject", subject), zap.Object("event", &event))
+	p.logger.Info("Publishing event to subject", zap.String("subject", fullSubject), zap.Object("event", &event))
 
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -121,8 +121,10 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 		cfg.Logger.Info("Creating new NATS JetStream stream", zap.String("stream_name", cfg.StreamName))
 		_, err = js.CreateStream(ctx,
 			jetstream.StreamConfig{
-				Name:       cfg.StreamName,
-				Subjects:   []string{"events.*.alert.*", "events.*.vars.*", "events.*.mdai.*"},
+				Name: cfg.StreamName,
+				// TODO create a separate stream for DLQ since it could have different retention settings
+				// TODO add source to subjects, right now it's events.hub.alert.fingerprint
+				Subjects:   []string{"events.*.alert.*", "events.*.vars.*", "events.*.mdai.*", "events.alert.dlq"},
 				Storage:    jetstream.FileStorage,
 				Retention:  jetstream.WorkQueuePolicy, // assume no replay needed
 				MaxMsgs:    -1,
