@@ -3,6 +3,7 @@ package nats
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,13 +26,19 @@ type EventSubscriber struct {
 	logger    *zap.Logger
 	conn      *nats.Conn
 	jetStream jetstream.JetStream
+
 	waitGroup sync.WaitGroup
 	closeCh   chan struct{}
 	closeOnce sync.Once
-	memberID  string
+
+	memberID string
+
+	joinedGroups []string // assuming no duplicates subscriptions created
+	runOnce      sync.Once
 }
 
 func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, error) {
+	logger.Info("Initializing NATS subscriber", zap.String("client_name", clientName))
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, err
@@ -53,6 +60,11 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 		return nil, fmt.Errorf("ensure stream: %w", err)
 	}
 
+	if err := ensurePCGroup(ctx, js, cfg); err != nil {
+		_ = conn.Drain()
+		return nil, fmt.Errorf("ensure pcgroup: %w", err)
+	}
+
 	return &EventSubscriber{
 		cfg:       cfg,
 		logger:    cfg.Logger,
@@ -63,10 +75,15 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 	}, nil
 }
 
-func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.HandlerInvoker) error {
-	dlqSubject := s.cfg.Subject + dlqSuffix
-	handler := func(msg jetstream.Msg) {
-		s.handleMessage(ctx, msg, dlqSubject, invoker)
+func (s *EventSubscriber) Subscribe(ctx context.Context, groupName string, dlqSubject string, invoker eventing.HandlerInvoker) error {
+	if groupName == "" {
+		return errors.New("groupName is required")
+	}
+	if invoker == nil {
+		return errors.New("invoker is required")
+	}
+	if dlqSubject == "" {
+		return errors.New("dlqSubject is required")
 	}
 
 	consumerConfig := jetstream.ConsumerConfig{
@@ -77,48 +94,57 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 		InactiveThreshold: s.cfg.InactiveThreshold,
 	}
 
-	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, eventing.ConsumerGroupName)
+	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, groupName)
 	if err != nil {
-		return fmt.Errorf("get Elastic Consumer Group config: %w", err)
+		return fmt.Errorf("get Elastic Consumer Group config (%s): %w", groupName, err)
 	}
 
 	memberID := s.memberID
 	if !ec.IsInMembership(memberID) {
-		members, err := pcgroups.AddMembers(
-			ctx,
-			s.jetStream,
-			s.cfg.StreamName,
-			eventing.ConsumerGroupName,
-			[]string{memberID},
-		)
+		members, err := pcgroups.AddMembers(ctx, s.jetStream, s.cfg.StreamName, groupName, []string{memberID})
 		if err != nil {
-			return err
+			return fmt.Errorf("add member to %s: %w", groupName, err)
 		}
-		s.logger.Info("Subscribed with member ID", zap.String("memberID", memberID), zap.Reflect("members", members))
+		s.logger.Info("Elastic group membership added",
+			zap.String("group", groupName),
+			zap.String("memberID", memberID),
+			zap.Reflect("members", members),
+		)
+	}
+
+	fullDlqSubject := s.cfg.Subject + "." + dlqSubject + dlqSuffix
+	handler := func(msg jetstream.Msg) {
+		s.handleMessage(ctx, msg, fullDlqSubject, invoker)
 	}
 
 	if _, err := pcgroups.ElasticConsume(
 		ctx,
 		s.jetStream,
 		s.cfg.StreamName,
-		eventing.ConsumerGroupName,
+		groupName,
 		memberID,
 		handler,
 		consumerConfig,
 	); err != nil {
-		return fmt.Errorf("consume: %w", err)
+		return fmt.Errorf("ElasticConsume(%s): %w", groupName, err)
 	}
-	s.logger.Info("Consumer started", zap.String("subject", s.cfg.Subject))
+	s.joinedGroups = append(s.joinedGroups, groupName)
+	s.logger.Info("Consumer started",
+		zap.String("group", groupName),
+		zap.String("prefix", s.cfg.Subject),
+	)
 
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-s.closeCh:
-		}
-
-		s.logger.Info("shutting down subscriber")
-		s.waitGroup.Wait()
-	}()
+	// Start the shutdown waiter once
+	s.runOnce.Do(func() {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-s.closeCh:
+			}
+			s.logger.Info("shutting down subscriber")
+			s.waitGroup.Wait()
+		}()
+	})
 
 	return nil
 }
@@ -126,17 +152,29 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, invoker eventing.Handle
 func (s *EventSubscriber) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
-		members, dropErr := pcgroups.DeleteMembers(
-			context.Background(),
-			s.jetStream,
-			s.cfg.StreamName,
-			eventing.ConsumerGroupName,
-			[]string{s.memberID},
-		)
-		if dropErr != nil {
-			s.logger.Error("failed to deregister from elastic group", zap.Error(dropErr), zap.String("memberID", s.memberID), zap.Strings("members", members))
-		} else {
-			s.logger.Info("deregistered from elastic group", zap.String("memberID", s.memberID), zap.Strings("members", members))
+		// Deregister from each elastic group we joined
+		for _, groupName := range s.joinedGroups {
+			members, dropErr := pcgroups.DeleteMembers(
+				context.Background(),
+				s.jetStream,
+				s.cfg.StreamName,
+				groupName,
+				[]string{s.memberID},
+			)
+			if dropErr != nil {
+				s.logger.Error("failed to deregister from elastic group",
+					zap.String("group", groupName),
+					zap.Error(dropErr),
+					zap.String("memberID", s.memberID),
+					zap.Strings("members", members),
+				)
+			} else {
+				s.logger.Info("deregistered from elastic group",
+					zap.String("group", groupName),
+					zap.String("memberID", s.memberID),
+					zap.Strings("members", members),
+				)
+			}
 		}
 
 		close(s.closeCh)

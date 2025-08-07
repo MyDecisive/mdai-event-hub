@@ -233,12 +233,15 @@ func main() {
 	}
 	defer configMgr.Stop()
 
-	handlerMap := handlers.GetSupportedHandlers(nil)
+	handlerMap := handlers.GetSupportedHandlers(nil) // TODO what is this?  why it's nil?
 
-	err = subscriber.Subscribe(ctx, ProcessEvent(ctx, valkeyClient, configMgr, logger, auditAdapter, handlerMap))
+	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", ProcessEvent(ctx, valkeyClient, configMgr, logger, auditAdapter, handlerMap))
 	if err != nil {
-		logger.Fatal("Failed to start event listener", zap.Error(err))
+		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
+
+	// TODO add Vars and Mdai event listeners as well.
+	// is it okay to process different event types in parallel?
 
 	<-ctx.Done()
 	logger.Info("Service shutting down")

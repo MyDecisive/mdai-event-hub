@@ -11,17 +11,19 @@ import (
 )
 
 const (
-	ConsumerGroupName          = "consumer-group"
+	AlertConsumerGroupName     = "alert-consumer-group"
+	VarsConsumerGroupName      = "vars-consumer-group"
+	MdaiConsumerGroupName      = "mdai-consumer-group"
 	ManualVariablesEventSource = "manual_variables_api"
 )
 
 type Publisher interface {
-	Publish(ctx context.Context, event MdaiEvent) error
+	Publish(ctx context.Context, event MdaiEvent, subject string) error
 	Close() error
 }
 
 type Subscriber interface {
-	Subscribe(ctx context.Context, invoker HandlerInvoker) error
+	Subscribe(ctx context.Context, groupName, dlqSubject string, invoker HandlerInvoker) error
 	Close() error
 }
 
@@ -34,10 +36,22 @@ type MdaiEvent struct {
 	Name          string    `json:"name"`
 	Timestamp     time.Time `json:"timestamp,omitempty"`
 	Payload       string    `json:"payload"`
-	Source        string    `json:"source"`
-	SourceID      string    `json:"source_id"`
+	Source        string    `json:"source"`    // used in subject, could not be empty
+	SourceID      string    `json:"source_id"` // ex alert fingerprint
 	CorrelationID string    `json:"correlation_id,omitempty"`
 	HubName       string    `json:"hub_name"`
+}
+
+type EventPerSubject struct {
+	Event   MdaiEvent
+	Subject string
+}
+
+type SubjectTokens struct {
+	Type        string // ex alert, vars
+	HubName     string
+	EventSource string // ex alertmanager, manual_variables_api
+	EventName   string
 }
 
 // MarshalLogObject signature requires it to return an error, but there's no way the code will generate one.

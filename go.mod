@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/cenkalti/backoff/v5 v5.0.2
 	github.com/decisiveai/mdai-data-core v0.1.11
-	github.com/decisiveai/mdai-operator v0.1.16-0.20250522133829-a3eb3bddb12b
+	github.com/decisiveai/mdai-operator v0.1.22
 	github.com/google/uuid v1.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nats-io/nats-server/v2 v2.11.6
@@ -62,7 +62,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.39.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect

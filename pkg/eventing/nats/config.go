@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -50,7 +49,7 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
-func safeToken(s string) string {
+func SafeToken(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "unknown"
@@ -58,13 +57,8 @@ func safeToken(s string) string {
 	return strings.NewReplacer(".", "_", " ", "_").Replace(s)
 }
 
-func subjectFromEvent(prefix string, event eventing.MdaiEvent) string {
-	return strings.Join([]string{
-		prefix,
-		safeToken(event.HubName),
-		safeToken(event.Source),
-		safeToken(event.Name),
-	}, ".")
+func addPrefixToSubject(prefix string, eventSubject string) string {
+	return prefix + "." + eventSubject
 }
 
 //nolint:ireturn
