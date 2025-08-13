@@ -120,11 +120,22 @@ func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *
 }
 
 // ProcessVariableEvent handles an MdaiEvent according to configured workflows.
-func ProcessVariableEvent(logger *zap.Logger) eventing.HandlerInvoker {
+func ProcessVariableEvent(ctx context.Context, client valkey.Client, logger *zap.Logger) eventing.HandlerInvoker {
+	dataAdapter := datacore.NewHandlerAdapter(client, logger)
+	mdaiInterface := handlers.MdaiInterface{
+		Data:   dataAdapter,
+		Logger: logger,
+	}
 
 	return func(event eventing.MdaiEvent) error {
-		// TODO impement this function
 		logger.Info("Processing variable event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+
+		err := handlers.HandleManualVariablesActions(ctx, mdaiInterface, event)
+		if err != nil {
+			return err
+		}
+
+		logger.Info("Variable event processed successfully", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
 		return nil
 	}
 }
@@ -257,9 +268,8 @@ func main() {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
 
-	// TODO add Vars and Mdai event listeners as well.
 	// is it okay to process different event types in parallel?
-	err = subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", ProcessVariableEvent(logger))
+	err = subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", ProcessVariableEvent(ctx, valkeyClient, logger))
 	if err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
