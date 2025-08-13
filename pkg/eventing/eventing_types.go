@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	AlertConsumerGroupName     = "alert-consumer-group"
-	VarsConsumerGroupName      = "vars-consumer-group"
-	MdaiConsumerGroupName      = "mdai-consumer-group"
-	ManualVariablesEventSource = "manual_variables_api"
+	AlertConsumerGroupName      = "alert-consumer-group"
+	VarsConsumerGroupName       = "vars-consumer-group"
+	ManualVariablesEventSource  = "manual_variables_api"
+	PrometheusAlertsEventSource = "prometheus"
 )
 
 type Publisher interface {
@@ -33,7 +33,8 @@ type HandlerInvoker func(event MdaiEvent) error
 // MdaiEvent represents an event in the system.
 type MdaiEvent struct {
 	ID            string    `json:"id,omitempty"`
-	Name          string    `json:"name"`
+	Name          string    `json:"type"`    // e.g. "alert_firing"
+	Version       int       `json:"version"` // schema version
 	Timestamp     time.Time `json:"timestamp,omitempty"`
 	Payload       string    `json:"payload"`
 	Source        string    `json:"source"`    // used in subject, could not be empty
@@ -47,18 +48,11 @@ type EventPerSubject struct {
 	Subject string
 }
 
-type SubjectTokens struct {
-	Type        string // ex alert, vars
-	HubName     string
-	EventSource string // ex alertmanager, manual_variables_api
-	EventName   string
-}
-
 // MarshalLogObject signature requires it to return an error, but there's no way the code will generate one.
 //
 //nolint:unparam
 func (mdaiEvent *MdaiEvent) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("name", mdaiEvent.Name)
+	enc.AddString("type", mdaiEvent.Name)
 	enc.AddString("id", mdaiEvent.ID)
 	enc.AddString("source", mdaiEvent.Source)
 	enc.AddString("source_id", mdaiEvent.SourceID)
@@ -75,6 +69,10 @@ func (mdaiEvent *MdaiEvent) ApplyDefaults() {
 	}
 	if mdaiEvent.Timestamp.IsZero() {
 		mdaiEvent.Timestamp = time.Now()
+	}
+
+	if mdaiEvent.Version == 0 {
+		mdaiEvent.Version = 1
 	}
 }
 

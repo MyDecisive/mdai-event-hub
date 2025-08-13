@@ -23,9 +23,9 @@ func TestValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"missing name", MdaiEvent{HubName: "hub", Payload: "data"}, true},
-		{"missing hub", MdaiEvent{Name: "test", Payload: "data"}, true},
-		{"missing payload", MdaiEvent{Name: "test", HubName: "hub"}, true},
-		{"valid event", MdaiEvent{Name: "test", HubName: "hub", Payload: "data"}, false},
+		{"missing hub", MdaiEvent{Type: "test", Payload: "data"}, true},
+		{"missing payload", MdaiEvent{Type: "test", HubName: "hub"}, true},
+		{"valid event", MdaiEvent{Type: "test", HubName: "hub", Payload: "data"}, false},
 	}
 
 	for _, tt := range tests {

@@ -24,6 +24,9 @@ require (
 	k8s.io/client-go v0.33.2
 )
 
+replace github.com/decisiveai/mdai-data-core => ../mdai-data-core
+replace github.com/decisiveai/mdai-operator => ../mdai-operator
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

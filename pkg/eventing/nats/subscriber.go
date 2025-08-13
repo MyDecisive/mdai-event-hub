@@ -94,7 +94,7 @@ func (s *EventSubscriber) Subscribe(ctx context.Context, groupName string, dlqSu
 		InactiveThreshold: s.cfg.InactiveThreshold,
 	}
 
-	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, groupName)
+	ec, err := pcgroups.GetElasticConsumerGroupConfig(ctx, s.jetStream, s.cfg.StreamName, groupName) // TODO add retry?
 	if err != nil {
 		return fmt.Errorf("get Elastic Consumer Group config (%s): %w", groupName, err)
 	}

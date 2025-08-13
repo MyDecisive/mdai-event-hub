@@ -43,7 +43,7 @@ func mustPublish(t *testing.T, pub *EventPublisher, ev eventing.MdaiEvent) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	if err := pub.Publish(ctx, ev, "mdai.alert.test"); err != nil {
+	if err := pub.Publish(ctx, ev, "alert.mdai.test"); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestElasticGroupDelivery(t *testing.T) {
 	var mu sync.Mutex
 
 	handler := func(ev eventing.MdaiEvent) error {
-		key := ev.HubName + "|" + ev.Name
+		key := ev.HubName + "|" + ev.Type
 		mu.Lock()
 		got[key]++
 		mu.Unlock()
@@ -87,15 +87,15 @@ func TestElasticGroupDelivery(t *testing.T) {
 
 	for range 5 {
 		mustPublish(t, pub, eventing.MdaiEvent{
-			Name: "NoisyServiceFired", HubName: "mdai-hub-second",
+			Type: "NoisyServiceFired", HubName: "mdai-hub-second",
 			Source: "tester", Payload: `{"v":1}`,
 		})
 		mustPublish(t, pub, eventing.MdaiEvent{
-			Name: "CPUHigh", HubName: "mdai-hub-second",
+			Type: "CPUHigh", HubName: "mdai-hub-second",
 			Source: "tester", Payload: `{"v":2}`,
 		})
 		mustPublish(t, pub, eventing.MdaiEvent{
-			Name: "DiskFill", HubName: "mdai-hub-second",
+			Type: "DiskFill", HubName: "mdai-hub-second",
 			Source: "tester", Payload: `{"v":3}`,
 		})
 	}
@@ -119,8 +119,8 @@ func TestPartitionKeyConsistency(t *testing.T) {
 
 	// Define two distinct event keys
 	events := []eventing.MdaiEvent{
-		{Name: "KeyA", HubName: "hub", Source: "src", Payload: `{"v":1}`},
-		{Name: "KeyB", HubName: "hub", Source: "src", Payload: `{"v":2}`},
+		{Type: "KeyA", HubName: "hub", Source: "src", Payload: `{"v":1}`},
+		{Type: "KeyB", HubName: "hub", Source: "src", Payload: `{"v":2}`},
 	}
 
 	type recorder struct {
@@ -130,7 +130,7 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	r1 := &recorder{}
 	handler1 := func(ev eventing.MdaiEvent) error {
 		r1.mu.Lock()
-		r1.seq = append(r1.seq, ev.Name)
+		r1.seq = append(r1.seq, ev.Type)
 		r1.mu.Unlock()
 		return nil
 	}
@@ -138,7 +138,7 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	r2 := &recorder{}
 	handler2 := func(ev eventing.MdaiEvent) error {
 		r2.mu.Lock()
-		r2.seq = append(r2.seq, ev.Name)
+		r2.seq = append(r2.seq, ev.Type)
 		r2.mu.Unlock()
 		return nil
 	}
@@ -219,7 +219,7 @@ func TestDLQForwarding(t *testing.T) {
 	require.NoError(t, err)
 
 	// Publish a single event
-	ev := eventing.MdaiEvent{Name: "FailTest", HubName: "hub", Source: "src", Payload: `{"v":42}`}
+	ev := eventing.MdaiEvent{Type: "FailTest", HubName: "hub", Source: "src", Payload: `{"v":42}`}
 	mustPublish(t, pub, ev)
 
 	// Expect the message in DLQ
@@ -259,7 +259,7 @@ func TestDuplicateSuppression(t *testing.T) {
 	require.NoError(t, err)
 
 	// Publish the same event twice
-	ev := eventing.MdaiEvent{ID: "dup-123", Name: "DupTest", HubName: "hub", Source: "src", Payload: `{"v":99}`}
+	ev := eventing.MdaiEvent{ID: "dup-123", Type: "DupTest", HubName: "hub", Source: "src", Payload: `{"v":99}`}
 	mustPublish(t, pub, ev)
 	time.Sleep(100 * time.Millisecond)
 	mustPublish(t, pub, ev)
@@ -310,7 +310,7 @@ func TestSingleActiveMember(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
-		received = append(received, ev.Name)
+		received = append(received, ev.Type)
 		mu.Unlock()
 		return nil
 	}))
@@ -323,7 +323,7 @@ func TestSingleActiveMember(t *testing.T) {
 	const count = 5
 	for i := range count {
 		for _, k := range keys {
-			mustPublish(t, pub, eventing.MdaiEvent{Name: k, HubName: "hub", Source: "src", Payload: fmt.Sprintf(`{"i":%d}`, i)})
+			mustPublish(t, pub, eventing.MdaiEvent{Type: k, HubName: "hub", Source: "src", Payload: fmt.Sprintf(`{"i":%d}`, i)})
 		}
 	}
 	time.Sleep(2 * time.Second)
@@ -358,7 +358,7 @@ func TestPublishEventIDGeneration(t *testing.T) {
 		{
 			name: "generates ID when empty",
 			event: eventing.MdaiEvent{
-				Name:    "TestEvent",
+				Type:    "TestEvent",
 				HubName: "hub",
 				Source:  "test",
 				Payload: `{"test": true}`,
@@ -370,7 +370,7 @@ func TestPublishEventIDGeneration(t *testing.T) {
 			name: "preserves existing ID",
 			event: eventing.MdaiEvent{
 				ID:      "existing-id-123",
-				Name:    "TestEvent",
+				Type:    "TestEvent",
 				HubName: "hub",
 				Source:  "test",
 				Payload: `{"test": true}`,
@@ -387,7 +387,7 @@ func TestPublishEventIDGeneration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event, "test.alert.test")
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			require.NoError(t, err, tt.desc)
 
 			if tt.hasID {
@@ -422,7 +422,7 @@ func TestPublishTimestampGeneration(t *testing.T) {
 		{
 			name: "generates timestamp when zero",
 			event: eventing.MdaiEvent{
-				Name:    "TestEvent",
+				Type:    "TestEvent",
 				HubName: "hub",
 				Source:  "test",
 				Payload: `{"test": true}`,
@@ -433,7 +433,7 @@ func TestPublishTimestampGeneration(t *testing.T) {
 		{
 			name: "preserves existing timestamp",
 			event: eventing.MdaiEvent{
-				Name:      "TestEvent",
+				Type:      "TestEvent",
 				HubName:   "hub",
 				Source:    "test",
 				Payload:   `{"test": true}`,
@@ -452,7 +452,7 @@ func TestPublishTimestampGeneration(t *testing.T) {
 			defer cancel()
 
 			beforePublish := time.Now().UTC()
-			err := pub.Publish(ctx, tt.event, "test.alert.test")
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			afterPublish := time.Now().UTC()
 
 			require.NoError(t, err, tt.desc)
@@ -482,7 +482,7 @@ func TestPublishSubjectGeneration(t *testing.T) {
 	}()
 
 	event := eventing.MdaiEvent{
-		Name:    "Test.Event",
+		Type:    "Test.Event",
 		HubName: "hub.name",
 		Source:  "test source",
 		Payload: `{"test": true}`,
@@ -491,7 +491,7 @@ func TestPublishSubjectGeneration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = pub.Publish(ctx, event, "test.alert.test")
+	err = pub.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err)
 }
 
@@ -518,7 +518,7 @@ func TestPublishHeaderGeneration(t *testing.T) {
 			name: "sets basic headers",
 			event: eventing.MdaiEvent{
 				ID:      "test-id",
-				Name:    "TestEvent",
+				Type:    "TestEvent",
 				HubName: "TestHub",
 				Source:  "TestSource",
 				Payload: `{"test": true}`,
@@ -529,7 +529,7 @@ func TestPublishHeaderGeneration(t *testing.T) {
 			name: "sets correlation ID header when present",
 			event: eventing.MdaiEvent{
 				ID:            "test-id-2",
-				Name:          "TestEvent2",
+				Type:          "TestEvent2",
 				HubName:       "TestHub2",
 				Source:        "TestSource2",
 				CorrelationID: "correlation-123",
@@ -541,7 +541,7 @@ func TestPublishHeaderGeneration(t *testing.T) {
 			name: "skips correlation ID header when empty",
 			event: eventing.MdaiEvent{
 				ID:      "test-id-3",
-				Name:    "TestEvent3",
+				Type:    "TestEvent3",
 				HubName: "TestHub3",
 				Source:  "TestSource3",
 				Payload: `{"test": true}`,
@@ -555,7 +555,7 @@ func TestPublishHeaderGeneration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event, "test.alert.test")
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			require.NoError(t, err, tt.desc)
 		})
 	}
@@ -585,7 +585,7 @@ func TestPublishJSONSerialization(t *testing.T) {
 			name: "serializes valid event",
 			event: eventing.MdaiEvent{
 				ID:      "valid-id",
-				Name:    "ValidEvent",
+				Type:    "ValidEvent",
 				HubName: "ValidHub",
 				Source:  "ValidSource",
 				Payload: `{"valid": true}`,
@@ -597,7 +597,7 @@ func TestPublishJSONSerialization(t *testing.T) {
 			name: "handles empty payload",
 			event: eventing.MdaiEvent{
 				ID:      "empty-payload-id",
-				Name:    "EmptyPayloadEvent",
+				Type:    "EmptyPayloadEvent",
 				HubName: "EmptyHub",
 				Source:  "EmptySource",
 				Payload: "",
@@ -612,7 +612,7 @@ func TestPublishJSONSerialization(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event, "test.alert.test")
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 
 			if tt.wantErr {
 				assert.Error(t, err, tt.desc)
@@ -685,7 +685,7 @@ func TestNewPublisherStreamCreation(t *testing.T) {
 	}()
 
 	event := eventing.MdaiEvent{
-		Name:    "StreamTest",
+		Type:    "StreamTest",
 		HubName: "hub",
 		Source:  "test",
 		Payload: `{"test": true}`,
@@ -694,9 +694,9 @@ func TestNewPublisherStreamCreation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = pub1.Publish(ctx, event, "test.alert.test")
+	err = pub1.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err, "first publisher should publish successfully")
 
-	err = pub2.Publish(ctx, event, "test.alert.test")
+	err = pub2.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err, "second publisher should publish successfully")
 }

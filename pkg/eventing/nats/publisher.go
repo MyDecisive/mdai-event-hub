@@ -83,7 +83,7 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent, 
 		Subject: fullSubject,
 		Data:    data,
 		Header: nats.Header{
-			"name":        []string{event.Name},
+			"name":        []string{event.Name}, //TODO review headers = identity, tracing, safety, and schema hints
 			"source":      []string{event.Source},
 			"hubName":     []string{event.HubName},
 			nats.MsgIdHdr: []string{event.ID},
@@ -106,13 +106,10 @@ func (p *EventPublisher) Close() error {
 }
 
 func ensurePCGroup(ctx context.Context, js jetstream.JetStream, cfg Config) error {
-	if err := ensureElasticGroup(ctx, js, cfg.StreamName, eventing.AlertConsumerGroupName, "events.*.alert.*", []int{1, 2}, cfg); err != nil {
+	if err := ensureElasticGroup(ctx, js, cfg.StreamName, eventing.AlertConsumerGroupName, "events.alert.*.*", []int{1, 2}, cfg); err != nil {
 		return err
 	}
-	if err := ensureElasticGroup(ctx, js, cfg.StreamName, eventing.VarsConsumerGroupName, "events.*.vars.*", []int{1, 2}, cfg); err != nil {
-		return err
-	}
-	return ensureElasticGroup(ctx, js, cfg.StreamName, eventing.MdaiConsumerGroupName, "events.*.mdai.*", []int{1, 2}, cfg)
+	return ensureElasticGroup(ctx, js, cfg.StreamName, eventing.VarsConsumerGroupName, "events.var.*.*", []int{1, 2}, cfg)
 }
 
 func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error {
@@ -123,8 +120,7 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg Config) error
 			jetstream.StreamConfig{
 				Name: cfg.StreamName,
 				// TODO create a separate stream for DLQ since it could have different retention settings
-				// TODO add source to subjects, right now it's events.hub.alert.fingerprint
-				Subjects:   []string{"events.*.alert.*", "events.*.vars.*", "events.*.mdai.*", "events.alert.dlq"},
+				Subjects:   []string{"events.alert.*.*", "events.alert.dlq", "events.var.*.*", "events.var.dlq"},
 				Storage:    jetstream.FileStorage,
 				Retention:  jetstream.WorkQueuePolicy, // assume no replay needed
 				MaxMsgs:    -1,

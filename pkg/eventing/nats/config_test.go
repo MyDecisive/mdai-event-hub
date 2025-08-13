@@ -262,9 +262,9 @@ func TestGetMemberIDs(t *testing.T) {
 		},
 		{
 			name:     "handles mixed case",
-			podName:  "Pod-Name-ABC",
+			podName:  "Pod-Type-ABC",
 			hostname: "",
-			expected: func(result string) bool { return result == "Pod-Name-ABC" },
+			expected: func(result string) bool { return result == "Pod-Type-ABC" },
 			desc:     "should preserve case",
 		},
 		{

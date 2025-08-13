@@ -79,7 +79,7 @@ func TestProcessEvent_Success(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
 	err = handler(event)
 
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
 	err = handler(event)
 
 	require.Error(t, err)
@@ -182,7 +182,7 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
 	err = handler(event)
 
 	require.NoError(t, err)
@@ -231,7 +231,7 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := ProcessEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
 	err = handler(event)
 
 	require.Error(t, err)
@@ -387,7 +387,7 @@ func TestGetWorkflowMap(t *testing.T) {
 			},
 		},
 	}
-	workflowMap := getWorkflowMap(zap.NewNop(), steps)
+	workflowMap := getRulesMap(zap.NewNop(), steps)
 	assert.Equal(t, expectedWorkflowMap, workflowMap)
 }
 
@@ -396,7 +396,7 @@ func TestGetWorkflowMap_InvalidStepsJson(t *testing.T) {
 		{"TestAlert1.firing": "[{\"hhhhandlerRef\" :\"testHandler1\", \"aaaargs\": {\"key1\":\"value1\"}}]"},
 	}
 	result := make(map[string][]operator.AutomationStep, 0)
-	workflowMap := getWorkflowMap(zap.NewNop(), steps)
+	workflowMap := getRulesMap(zap.NewNop(), steps)
 	assert.Equal(t, workflowMap, result)
 }
 
