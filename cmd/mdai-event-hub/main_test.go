@@ -78,7 +78,7 @@ func TestProcessEvent_Success(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := eventhub.ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := eventhub.ProcessAlertingEvent(ctx, cmController, logger, nil)
 	err = handler(event)
 
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestProcessEvent_NoHubName(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := eventhub.ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := eventhub.ProcessAlertingEvent(ctx, cmController, logger, nil)
 	err = handler(event)
 
 	require.Error(t, err)
@@ -181,7 +181,7 @@ func TestProcessEvent_MatchAlertNameOnly(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := eventhub.ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := eventhub.ProcessAlertingEvent(ctx, cmController, logger, nil)
 	err = handler(event)
 
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestProcessEvent_NoWorkflowFound(t *testing.T) {
 		"testHandler": testHandler,
 	})
 
-	handler := eventhub.ProcessAlertingEvent(ctx, mockClient, cmController, logger, nil, handlerMap)
+	handler := eventhub.ProcessAlertingEvent(ctx, cmController, logger, nil)
 	err = handler(event)
 
 	require.Error(t, err)

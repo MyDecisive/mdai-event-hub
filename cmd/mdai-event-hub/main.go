@@ -11,7 +11,6 @@ import (
 	"github.com/decisiveai/mdai-data-core/audit"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
-	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	internalvalkey "github.com/decisiveai/mdai-event-hub/internal/valkey"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
@@ -93,10 +92,8 @@ func main() {
 	}
 	defer configMgr.Stop()
 
-	handlerMap := handlers.GetSupportedHandlers(nil) // TODO what is this?  why it's nil?
-
 	// prometheus alerts
-	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, valkeyClient, configMgr, logger, auditAdapter, handlerMap))
+	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, configMgr, logger, auditAdapter))
 	if err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}

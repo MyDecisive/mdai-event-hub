@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// TODO move this package to data-core
+
 const (
 	AlertConsumerGroupName      = "alert-consumer-group"
 	VarsConsumerGroupName       = "vars-consumer-group"

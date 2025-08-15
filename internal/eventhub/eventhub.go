@@ -27,13 +27,7 @@ func Init(logger *zap.Logger) (eventing.Subscriber, error) {
 }
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
-func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter, handlerMap handlers.HandlerMap) eventing.HandlerInvoker {
-	dataAdapter := corehandlers.NewHandlerAdapter(client, logger)
-
-	mdaiInterface := handlers.MdaiInterface{
-		Data:   dataAdapter,
-		Logger: logger,
-	}
+func ProcessAlertingEvent(ctx context.Context, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 
 	return func(event eventing.MdaiEvent) error {
 		hubName := event.HubName
@@ -82,7 +76,9 @@ func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *
 
 		for _, rule := range rules {
 			logger.Info("Processing automation rule", zap.String("rule", rule.Name))
-			err := safePerformAutomationStep(handlerMap, mdaiInterface, rule, event)
+
+			// TODO create CommandEvent object and send it to dedicated subject
+			// subject pattern should be worker_type(
 
 			if auditAdapter != nil {
 				if auditErr := recordAuditEventFromMdaiEvent(ctx, logger, auditAdapter, event, rule, err == nil); auditErr != nil {
@@ -122,6 +118,13 @@ func ProcessVariableEvent(ctx context.Context, client valkey.Client, logger *zap
 
 	return func(event eventing.MdaiEvent) error {
 		logger.Info("Processing variable event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+
+		if event.Source != eventing.ManualVariablesEventSource {
+			logger.Error("Unsupported manual variable update event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
+			return errors.New("unsupported manual variable update event source")
+		}
+
+		// TODO issue a command event here as well
 
 		err := handlers.HandleManualVariablesActions(ctx, mdaiInterface, event)
 		if err != nil {
