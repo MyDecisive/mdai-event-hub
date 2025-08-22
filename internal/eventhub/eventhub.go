@@ -28,6 +28,12 @@ func Init(logger *zap.Logger) (eventing.Subscriber, error) {
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
 func ProcessAlertingEvent(ctx context.Context, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
+	dataAdapter := datacore.NewHandlerAdapter(client, logger)
+
+	mdaiInterface := handlers.MdaiInterface{
+		Data:   dataAdapter,
+		Logger: logger,
+	}
 
 	return func(event eventing.MdaiEvent) error {
 		hubName := event.HubName
@@ -74,11 +80,40 @@ func ProcessAlertingEvent(ctx context.Context, configMgr *kube.ConfigMapControll
 			return err
 		}
 
+		// this is temporarily connecting new subjects to old handlers
 		for _, rule := range rules {
 			logger.Info("Processing automation rule", zap.String("rule", rule.Name))
+			for _, cmd := range rule.Commands {
+				inputs := cmd.Inputs
+				cmdType := cmd.Type
+				switch cmdType {
+				case "variable.set.add":
+					err := handlers.HandleAddNoisyServiceToSet(mdaiInterface, event, inputs)
+					if err != nil {
+						return err
+					}
+				case "variable.set.remove":
+					err := handlers.HandleRemoveNoisyServiceFromSet(mdaiInterface, event, inputs)
+					if err != nil {
+						return err
+					}
+				case "variable.set.sync": // TODO add action to the mdai operator
+					err := handlers.HandleUpdateSetByComparison(mdaiInterface, event, inputs)
+					if err != nil {
+						return err
+					}
+				case "webhook.call":
+					err := handlers.HandleCallSlackWebhookFn(event, inputs)
+					if err != nil {
+						return err
+					}
+				default:
+					logger.Error("Unsupported command type", zap.String("commandType", cmdType))
+					return fmt.Errorf("unsupported command type: %s", cmdType)
+				}
+			}
 
 			// TODO create CommandEvent object and send it to dedicated subject
-			// subject pattern should be worker_type(
 
 			if auditAdapter != nil {
 				if auditErr := recordAuditEventFromMdaiEvent(ctx, logger, auditAdapter, event, rule, err == nil); auditErr != nil {

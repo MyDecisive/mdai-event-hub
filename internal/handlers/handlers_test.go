@@ -87,7 +87,7 @@ func TestHandleAddNoisyServiceToSet(t *testing.T) {
 		"variable_ref":    "foobar",
 		"payload_val_ref": "key",
 	}
-	require.NoError(t, handleAddNoisyServiceToSet(mdaiInterface, event, args))
+	require.NoError(t, HandleAddNoisyServiceToSet(mdaiInterface, event, args))
 	assert.Contains(t, mockHandlerAdapter.Calls["AddElementToSet"], map[string]string{
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",
@@ -117,7 +117,7 @@ func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
 		"variable_ref":    "foobar",
 		"payload_val_ref": "key",
 	}
-	require.NoError(t, handleRemoveNoisyServiceFromSet(mdaiInterface, event, args))
+	require.NoError(t, HandleRemoveNoisyServiceFromSet(mdaiInterface, event, args))
 	assert.Contains(t, mockHandlerAdapter.Calls["RemoveElementFromSet"], map[string]string{
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",

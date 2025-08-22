@@ -12,33 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	HandleAddNoisyServiceToSet      HandlerName = "HandleAddNoisyServiceToSet"
-	HandleRemoveNoisyServiceFromSet HandlerName = "HandleRemoveNoisyServiceFromSet"
-	HandleNoisyServiceAlert         HandlerName = "HandleNoisyServiceAlert"
-	HandleCallSlackWebhook          HandlerName = "HandleCallSlackWebhook"
-)
-
-func GetDefaultHandlers() HandlerMap {
-	return HandlerMap{
-		HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
-		HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
-		HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
-		HandleCallSlackWebhook:          HandleCallSlackWebhookFn,
-	}
-}
-
-// GetSupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
-// The handler library will have to export a map that can be dynamically accessed.
-// To enforce this, handlers are declared with a lower case first character so they
-// are not exported directly but can only be accessed through the map.
-func GetSupportedHandlers(h HandlerMap) HandlerMap {
-	if h != nil {
-		return h
-	}
-	return GetDefaultHandlers()
-}
-
 func ProcessEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	if event.Payload == "" {
 		return map[string]any{}, nil
@@ -54,9 +27,11 @@ func ProcessEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	return payloadData, nil
 }
 
-func getArgsValueWithDefault(key string, defaultValue string, args map[string]string) string {
+func getArgsValueWithDefault(key string, defaultValue string, args map[string]any) string {
 	if val, ok := args[key]; ok {
-		return val
+		if strVal, ok := val.(string); ok {
+			return strVal
+		}
 	}
 	return defaultValue
 }
@@ -75,7 +50,7 @@ func getString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	payloadData, err := ProcessEventPayload(event)
 	if err != nil {
@@ -111,7 +86,7 @@ func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, a
 	return nil
 }
 
-func handleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	payloadData, err := ProcessEventPayload(event)
 	if err != nil {
@@ -135,7 +110,7 @@ func handleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, ar
 	return nil
 }
 
-func handleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	payloadData, err := ProcessEventPayload(event)
 	if err != nil {
@@ -288,11 +263,15 @@ type SlackPayload struct {
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleCallSlackWebhookFn(event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	webhookURL, webhookURLExists := args["webhook_url"]
 	if !webhookURLExists || webhookURL == "" {
 		return errors.New("webhook_url is a required arg value, cannot call webhook")
+	}
+	webhookURLStr, ok := webhookURL.(string)
+	if !ok || webhookURLStr == "" {
+		return errors.New("webhook_url must be a non-empty string")
 	}
 
 	payloadData, err := ProcessEventPayload(event)
@@ -310,7 +289,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURLStr, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -331,13 +310,16 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	return nil
 }
 
-func addPayloadField(fields []map[string]string, args map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
+func addPayloadField(fields []map[string]string, args map[string]any, payloadData map[string]any, key string) ([]map[string]string, error) {
 	payloadKey, exists := args[key]
 	if !exists || payloadKey == "" {
 		return fields, nil
 	}
-
-	payloadValue, err := getString(payloadData, payloadKey)
+	payloadKeyStr, ok := payloadKey.(string)
+	if !ok {
+		return nil, fmt.Errorf("payloadKey for %s is not a string", key)
+	}
+	payloadValue, err := getString(payloadData, payloadKeyStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s from payload with error: %w", payloadKey, err)
 	}
@@ -348,13 +330,14 @@ func addPayloadField(fields []map[string]string, args map[string]string, payload
 	}), nil
 }
 
-func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
+func buildSlackPayload(args map[string]any, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
 	message, messageExists := args["message"]
-	if !messageExists || message == "" {
-		message = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
+	messageStr, ok := message.(string)
+	if !messageExists || !ok || messageStr == "" {
+		messageStr = fmt.Sprintf("MDAI Hub Event - %s - %s", event.HubName, event.Name)
 	}
 	payload := SlackPayload{
-		Text: message,
+		Text: messageStr,
 		Blocks: []map[string]any{
 			{
 				"type": "section",
@@ -394,8 +377,11 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 	linkText, linkTextExists := args["link_text"]
 	linkURL, linkURLExists := args["link_url"]
 	if linkURLExists && linkURL != "" {
-		if !linkTextExists || linkText == "" {
-			linkText = "See more"
+		linkTextStr := "See more"
+		if linkTextExists {
+			if str, ok := linkText.(string); ok && str != "" {
+				linkTextStr = str
+			}
 		}
 		payload.Blocks = append(payload.Blocks, map[string]any{
 			"type": "actions",
@@ -404,7 +390,7 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 					"type": "button",
 					"text": map[string]string{
 						"type": "plain_text",
-						"text": linkText,
+						"text": linkTextStr,
 					},
 					"style": "primary",
 					"url":   linkURL,
