@@ -50,42 +50,6 @@ func getString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
-	ctx := context.Background()
-	payloadData, err := ProcessEventPayload(event)
-	if err != nil {
-		return fmt.Errorf("failed to process payload: %w", err)
-	}
-	mdai.Logger.Debug("handleNoisyServiceList ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
-
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
-	payloadComparableKey := getArgsValueWithDefault("payload_comparable_ref", "status", args)
-	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
-
-	comp, err := getString(payloadData, payloadComparableKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload comparable key: %w", err)
-	}
-	payloadValue, err := getString(payloadData, payloadValueKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload value key: %w", err)
-	}
-
-	switch comp {
-	case "firing":
-		if err := mdai.Data.AddElementToSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationID); err != nil {
-			return err
-		}
-	case "resolved":
-		if err := mdai.Data.RemoveElementFromSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationID); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unknown alert status: %s", comp)
-	}
-	return nil
-}
-
 func HandleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	payloadData, err := ProcessEventPayload(event)
@@ -94,10 +58,11 @@ func HandleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, ar
 	}
 	mdai.Logger.Debug("handleAddNoisyServiceToSet ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
 
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
+	payloadValueKey := getArgsValueWithDefault("valueFrom", "service_name", args)
 	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
 
-	value, err := getString(payloadData, payloadValueKey)
+	labels := payloadData["labels"].(map[string]any)
+	value, err := getString(labels, payloadValueKey)
 	if err != nil {
 		return fmt.Errorf("failed to get payload value key: %w", err)
 	}
@@ -118,10 +83,11 @@ func HandleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEven
 	}
 	mdai.Logger.Debug("handleRemoveNoisyServiceFromSet ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
 
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
+	payloadValueKey := getArgsValueWithDefault("valueFrom", "service_name", args)
 	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
 
-	value, err := getString(payloadData, payloadValueKey)
+	labels := payloadData["labels"].(map[string]any)
+	value, err := getString(labels, payloadValueKey)
 	if err != nil {
 		return fmt.Errorf("failed to get payload value key: %w", err)
 	}
@@ -263,7 +229,7 @@ type SlackPayload struct {
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallSlackWebhookFn(event eventing.MdaiEvent, args map[string]any) error {
+func HandleCallSlackWebhookFn(_ MdaiInterface, event eventing.MdaiEvent, args map[string]any) error {
 	ctx := context.Background()
 	webhookURL, webhookURLExists := args["webhook_url"]
 	if !webhookURLExists || webhookURL == "" {

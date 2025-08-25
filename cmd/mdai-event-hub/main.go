@@ -93,7 +93,7 @@ func main() {
 	defer configMgr.Stop()
 
 	// prometheus alerts
-	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, configMgr, logger, auditAdapter))
+	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, valkeyClient, configMgr, logger, auditAdapter))
 	if err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}

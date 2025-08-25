@@ -27,8 +27,8 @@ func Init(logger *zap.Logger) (eventing.Subscriber, error) {
 }
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
-func ProcessAlertingEvent(ctx context.Context, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
-	dataAdapter := datacore.NewHandlerAdapter(client, logger)
+func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
+	dataAdapter := corehandlers.NewHandlerAdapter(client, logger)
 
 	mdaiInterface := handlers.MdaiInterface{
 		Data:   dataAdapter,
@@ -84,26 +84,20 @@ func ProcessAlertingEvent(ctx context.Context, configMgr *kube.ConfigMapControll
 		for _, rule := range rules {
 			logger.Info("Processing automation rule", zap.String("rule", rule.Name))
 			for _, cmd := range rule.Commands {
-				inputs := cmd.Inputs
 				cmdType := cmd.Type
 				switch cmdType {
 				case "variable.set.add":
-					err := handlers.HandleAddNoisyServiceToSet(mdaiInterface, event, inputs)
+					err := safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdaiInterface, cmd, event)
 					if err != nil {
 						return err
 					}
 				case "variable.set.remove":
-					err := handlers.HandleRemoveNoisyServiceFromSet(mdaiInterface, event, inputs)
-					if err != nil {
-						return err
-					}
-				case "variable.set.sync": // TODO add action to the mdai operator
-					err := handlers.HandleUpdateSetByComparison(mdaiInterface, event, inputs)
+					err := safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdaiInterface, cmd, event)
 					if err != nil {
 						return err
 					}
 				case "webhook.call":
-					err := handlers.HandleCallSlackWebhookFn(event, inputs)
+					err := safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdaiInterface, cmd, event)
 					if err != nil {
 						return err
 					}
@@ -171,34 +165,28 @@ func ProcessVariableEvent(ctx context.Context, client valkey.Client, logger *zap
 	}
 }
 
-func safePerformAutomationStep(handlerMap handlers.HandlerMap, mdai handlers.MdaiInterface, rule events.Rule, event eventing.MdaiEvent) (err error) {
+func safePerformAutomationStep(handlerFn handlers.HandlerFunc, mdai handlers.MdaiInterface, command events.Command, event eventing.MdaiEvent) (err error) {
 	// handle panics
 	defer func() {
 		if r := recover(); r != nil {
 			mdai.Logger.Error(
 				"Panic inside automation handler",
-				zap.Reflect("panicValue", r), // FIXME
-				//zap.Inline("trigger", rule.Trigger),
+				zap.Reflect("panicValue", r),
+				zap.String("command", command.Type),
 				zap.String("eventName", event.Name),
 				zap.String("hubName", event.HubName),
 				zap.String("eventCorrelationId", event.CorrelationID),
 			)
-			err = fmt.Errorf("panic in handler %s: %v", rule.Name, r)
+			err = fmt.Errorf("panic executing command %s: %v", command.Type, r)
 		}
 	}()
 
-	// FIXME
 	mdai.Logger.Info("<< Executing automation step >>")
-	return nil
-	//handlerName := handlers.HandlerName(rule.Name)
 
-	//if handlerFn, exists := handlerMap[handlerName]; exists {
-	//	if err := handlerFn(mdai, event, rule.Arguments); err != nil {
-	//		return fmt.Errorf("handler %s failed: %w", handlerName, err)
-	//	}
-	//	return nil
-	//}
-	//return fmt.Errorf("handler %s not supported", handlerName)
+	if err := handlerFn(mdai, event, command.Inputs); err != nil {
+		return fmt.Errorf("command %s failed: %w", command.Type, err)
+	}
+	return nil
 }
 
 func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, rule events.Rule, automationSucceeded bool) error {
