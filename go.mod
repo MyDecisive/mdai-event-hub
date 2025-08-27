@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/cenkalti/backoff/v5 v5.0.2
 	github.com/decisiveai/mdai-data-core v0.2.1-0.20250827142847-3b3e883635fb
-	github.com/decisiveai/mdai-operator v0.1.22
+	github.com/decisiveai/mdai-operator v0.1.23-0.20250827200314-419322f18660
 	github.com/google/uuid v1.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nats-io/nats-server/v2 v2.11.6
@@ -21,8 +21,6 @@ require (
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
 )
-
-replace github.com/decisiveai/mdai-operator => ../mdai-operator
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
