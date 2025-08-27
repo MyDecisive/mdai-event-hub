@@ -12,12 +12,10 @@ import (
 	"github.com/decisiveai/mdai-data-core/audit"
 	"github.com/decisiveai/mdai-data-core/events"
 	"github.com/decisiveai/mdai-data-core/events/triggers"
-	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
 	"github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing/nats"
-	"github.com/valkey-io/valkey-go"
 	"go.uber.org/zap"
 )
 
@@ -27,33 +25,30 @@ func Init(logger *zap.Logger) (eventing.Subscriber, error) {
 }
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
-func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *kube.ConfigMapController, logger *zap.Logger, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
-	dataAdapter := corehandlers.NewHandlerAdapter(client, logger)
-
-	mdaiInterface := handlers.MdaiInterface{
-		Data:   dataAdapter,
-		Logger: logger,
-	}
-
+func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, configMgr *kube.ConfigMapController, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
 		hubName := event.HubName
 		if hubName == "" {
 			return errors.New("no hub name provided")
 		}
-		logger.Info("Processing alerting event for hub",
+		mdai.Logger.Info("Processing alerting event for hub",
 			zap.String("hubName", event.HubName),
 			zap.String("eventName", event.Name),
 		)
 
 		if event.Source != eventing.PrometheusAlertsEventSource {
-			logger.Error("Unsupported Alerts event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
+			mdai.Logger.Error("Unsupported Alerts event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
 			return errors.New("unsupported Alerts event source")
 		}
 
-		hubData, err := configMgr.GetHubData(event.HubName)
+		automationConfig, err := configMgr.GetConfigMapByHubName(event.HubName)
 		if err != nil {
 			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
 		}
+
+		// we need a hub namespace to get secrets and configMaps
+		mdai.Namespace = automationConfig.Namespace
+		hubData := automationConfig.Data
 
 		// matches event type which should be alert name plus status with rules keys
 		baseRules := func(eventName string, rulesMap map[string]events.Rule) []events.Rule {
@@ -73,64 +68,54 @@ func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *
 		}
 
 		// TODO change informer logic to cache rules so we don't need to process it here every time
-		rules := baseRules(event.Name, getRulesMap(logger, hubData))
+		rules := baseRules(event.Name, getRulesMap(mdai.Logger, hubData))
 		if len(rules) == 0 {
 			err := fmt.Errorf("no matching configured automation for event: %s", event.Name)
-			logger.Error("No configured automation for event", zap.String("type", event.Name), zap.Error(err))
+			mdai.Logger.Error("No configured automation for event", zap.String("type", event.Name), zap.Error(err))
 			return err
 		}
 
 		// this is temporarily connecting new subjects to old handlers
 		for _, rule := range rules {
-			logger.Info("Processing automation rule", zap.String("rule", rule.Name))
+			mdai.Logger.Info("Processing automation rule", zap.String("rule", rule.Name))
 			for _, cmd := range rule.Commands {
 				cmdType := cmd.Type
+				mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
+				var err error
 				switch cmdType {
 				case "variable.set.add":
-					err := safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdaiInterface, cmd, event)
-					if err != nil {
-						return err
-					}
+					err = safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdai, cmd, event)
 				case "variable.set.remove":
-					err := safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdaiInterface, cmd, event)
-					if err != nil {
-						return err
-					}
+					err = safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdai, cmd, event)
 				case "webhook.call":
-					err := safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdaiInterface, cmd, event)
-					if err != nil {
-						return err
-					}
+					err = safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdai, cmd, event)
 				default:
-					logger.Error("Unsupported command type", zap.String("commandType", cmdType))
+					mdai.Logger.Error("Unsupported command type", zap.String("commandType", cmdType))
 					return fmt.Errorf("unsupported command type: %s", cmdType)
 				}
-			}
 
-			// TODO create CommandEvent object and send it to dedicated subject
+				if auditAdapter != nil {
+					if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, rule, err == nil); auditErr != nil {
+						mdai.Logger.Error("Failed to write audit event for automation step",
+							zap.String("hubName", event.HubName),
+							zap.String("name", event.Name),
+							zap.String("rule", rule.Name),
+							zap.String("eventCorrelationId", event.CorrelationID),
+							zap.Error(auditErr),
+						)
+					}
+				}
 
-			if auditAdapter != nil {
-				if auditErr := recordAuditEventFromMdaiEvent(ctx, logger, auditAdapter, event, rule, err == nil); auditErr != nil {
-					logger.Error("Failed to write audit event for automation step",
+				if err != nil {
+					mdai.Logger.Error("Automation step failed",
 						zap.String("hubName", event.HubName),
 						zap.String("name", event.Name),
 						zap.String("rule", rule.Name),
 						zap.String("eventCorrelationId", event.CorrelationID),
 						zap.Error(err),
 					)
+					return err
 				}
-			}
-
-			if err != nil {
-				logger.Error("Automation step failed",
-					zap.String("hubName", event.HubName),
-					zap.String("name", event.Name),
-					// FIXME
-					//zap.String("handlerRef", rule.HandlerRef),
-					zap.String("eventCorrelationId", event.CorrelationID),
-					zap.Error(err),
-				)
-				return err
 			}
 		}
 		return nil
@@ -138,29 +123,23 @@ func ProcessAlertingEvent(ctx context.Context, client valkey.Client, configMgr *
 }
 
 // ProcessVariableEvent handles an MdaiEvent according to configured workflows.
-func ProcessVariableEvent(ctx context.Context, client valkey.Client, logger *zap.Logger) eventing.HandlerInvoker {
-	dataAdapter := corehandlers.NewHandlerAdapter(client, logger)
-	mdaiInterface := handlers.MdaiInterface{
-		Data:   dataAdapter,
-		Logger: logger,
-	}
-
+func ProcessVariableEvent(ctx context.Context, mdai handlers.MdaiInterface) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
-		logger.Info("Processing variable event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+		mdai.Logger.Info("Processing variable event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
 
 		if event.Source != eventing.ManualVariablesEventSource {
-			logger.Error("Unsupported manual variable update event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
+			mdai.Logger.Error("Unsupported manual variable update event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
 			return errors.New("unsupported manual variable update event source")
 		}
 
 		// TODO issue a command event here as well
 
-		err := handlers.HandleManualVariablesActions(ctx, mdaiInterface, event)
+		err := handlers.HandleManualVariablesActions(ctx, mdai, event)
 		if err != nil {
 			return err
 		}
 
-		logger.Info("Variable event processed successfully", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+		mdai.Logger.Info("Variable event processed successfully", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
 		return nil
 	}
 }
@@ -212,40 +191,39 @@ func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, audi
 	return auditAdapter.InsertAuditLogEventFromMap(ctx, eventMap)
 }
 
-func getRulesMap(logger *zap.Logger, hubData []map[string]string) map[string]events.Rule {
+func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]events.Rule {
 	result := make(map[string]events.Rule, len(hubData))
 
-	for _, data := range hubData {
-		for ruleName, ruleJson := range data { // key is the rule name
-			// Decode into a wire struct first; Trigger stays raw.
-			var wireRule struct {
-				Name     string           `json:"name"`
-				Trigger  json.RawMessage  `json:"trigger"`
-				Commands []events.Command `json:"commands"`
-			}
-			dec := json.NewDecoder(strings.NewReader(ruleJson))
-			dec.DisallowUnknownFields()
-			if err := dec.Decode(&wireRule); err != nil {
-				logger.Warn("could not unmarshall rule", zap.String("key", ruleName), zap.Error(err))
-				continue
-			}
-
-			trigger, err := triggers.BuildTrigger(wireRule.Trigger) // returns a *concrete that implements Trigger
-			if err != nil || trigger == nil {
-				logger.Warn("invalid trigger", zap.String("key", ruleName), zap.Error(err))
-				continue
-			}
-
-			var rule events.Rule
-			rule.Name = wireRule.Name
-			if rule.Name == "" {
-				rule.Name = ruleName // fall back to ConfigMap key
-			}
-			rule.Trigger = trigger // store pointer so only one assertion form exists later
-			rule.Commands = wireRule.Commands
-
-			result[ruleName] = rule
+	for ruleName, ruleJSON := range hubData { // key is the rule name
+		// Decode into a wire struct first; Trigger stays raw.
+		var wireRule struct {
+			Name     string           `json:"name"`
+			Trigger  json.RawMessage  `json:"trigger"`
+			Commands []events.Command `json:"commands"`
 		}
+		dec := json.NewDecoder(strings.NewReader(ruleJSON))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&wireRule); err != nil {
+			logger.Warn("could not unmarshall rule", zap.String("key", ruleName), zap.Error(err))
+			continue
+		}
+
+		trigger, err := triggers.BuildTrigger(wireRule.Trigger) // returns a *concrete that implements Trigger
+		if err != nil || trigger == nil {
+			logger.Warn("invalid trigger", zap.String("key", ruleName), zap.Error(err))
+			continue
+		}
+
+		var rule events.Rule
+		rule.Name = wireRule.Name
+		if rule.Name == "" {
+			rule.Name = ruleName // fall back to ConfigMap key
+		}
+		rule.Trigger = trigger // store pointer so only one assertion form exists later
+		rule.Commands = wireRule.Commands
+
+		result[ruleName] = rule
 	}
+
 	return result
 }

@@ -83,7 +83,7 @@ func (p *EventPublisher) Publish(ctx context.Context, event eventing.MdaiEvent, 
 		Subject: fullSubject,
 		Data:    data,
 		Header: nats.Header{
-			"name":        []string{event.Name}, //TODO review headers = identity, tracing, safety, and schema hints
+			"name":        []string{event.Name}, // TODO review headers = identity, tracing, safety, and schema hints
 			"source":      []string{event.Source},
 			"hubName":     []string{event.HubName},
 			nats.MsgIdHdr: []string{event.ID},

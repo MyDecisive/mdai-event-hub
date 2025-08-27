@@ -9,13 +9,16 @@ import (
 	"time"
 
 	"github.com/decisiveai/mdai-data-core/audit"
+	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	internalvalkey "github.com/decisiveai/mdai-event-hub/internal/valkey"
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -92,14 +95,21 @@ func main() {
 	}
 	defer configMgr.Stop()
 
+	mdaiInterface := handlers.MdaiInterface{
+		Data:      corehandlers.NewHandlerAdapter(valkeyClient, logger),
+		Logger:    logger,
+		Namespace: metav1.NamespaceDefault,
+		Kube:      clientset,
+	}
+
 	// prometheus alerts
-	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, valkeyClient, configMgr, logger, auditAdapter))
+	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, mdaiInterface, configMgr, auditAdapter))
 	if err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
 
 	// manual variables updates
-	err = subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", eventhub.ProcessVariableEvent(ctx, valkeyClient, logger))
+	err = subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", eventhub.ProcessVariableEvent(ctx, mdaiInterface))
 	if err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
