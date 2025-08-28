@@ -102,18 +102,20 @@ func main() {
 		Kube:      clientset,
 	}
 
+	subscribe(ctx, subscriber, mdaiInterface, configMgr, auditAdapter, logger)
+
+	<-ctx.Done()
+	logger.Info("Service shutting down")
+}
+
+func subscribe(ctx context.Context, subscriber eventing.Subscriber, mdaiInterface handlers.MdaiInterface, configMgr *dcorekube.ConfigMapController, auditAdapter *audit.AuditAdapter, logger *zap.Logger) {
 	// prometheus alerts
-	err = subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, mdaiInterface, configMgr, auditAdapter))
-	if err != nil {
+	if err := subscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.ProcessAlertingEvent(ctx, mdaiInterface, configMgr, auditAdapter)); err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
 
 	// manual variables updates
-	err = subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", eventhub.ProcessVariableEvent(ctx, mdaiInterface))
-	if err != nil {
+	if err := subscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", eventhub.ProcessVariableEvent(ctx, mdaiInterface)); err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
-
-	<-ctx.Done()
-	logger.Info("Service shutting down")
 }

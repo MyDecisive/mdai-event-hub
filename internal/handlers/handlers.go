@@ -11,11 +11,10 @@ import (
 	"strings"
 
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
-	"github.com/decisiveai/mdai-operator/api/v1"
+	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -73,7 +72,7 @@ func handleSetMembership(
 	opName string,
 	op setOp,
 ) error {
-	var in v1.SetAction
+	var in mdaiv1.SetAction
 	if err := DecodeInputs(raw, &in); err != nil {
 		return fmt.Errorf("%s: decode SetAction: %w", opName, err)
 	}
@@ -259,7 +258,7 @@ type SlackPayload struct {
 }
 
 func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
-	var in v1.CallWebhookAction
+	var in mdaiv1.CallWebhookAction
 	if err := DecodeInputs(raw, &in); err != nil {
 		return fmt.Errorf("decode call.webhook: %w", err)
 	}
@@ -312,7 +311,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, raw 
 	return nil
 }
 
-func resolveStringOrFrom(ctx context.Context, kube kubernetes.Interface, namespace string, stringOrFrom v1.StringOrFrom) (string, error) {
+func resolveStringOrFrom(ctx context.Context, kube kubernetes.Interface, namespace string, stringOrFrom mdaiv1.StringOrFrom) (string, error) {
 	if stringOrFrom.Value != nil {
 		return strings.TrimSpace(*stringOrFrom.Value), nil
 	}

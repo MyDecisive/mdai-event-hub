@@ -75,50 +75,58 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, conf
 		}
 
 		// this is temporarily connecting new subjects to old handlers
+		// one event can trigger several rules
 		for _, rule := range rules {
-			mdai.Logger.Info("Processing automation rule", zap.String("rule", rule.Name))
-			for _, cmd := range rule.Commands {
-				cmdType := cmd.Type
-				mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
-				var err error
-				switch cmdType {
-				case "variable.set.add":
-					err = safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdai, cmd, event)
-				case "variable.set.remove":
-					err = safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdai, cmd, event)
-				case "webhook.call":
-					err = safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdai, cmd, event)
-				default:
-					mdai.Logger.Error("Unsupported command type", zap.String("commandType", cmdType))
-					return fmt.Errorf("unsupported command type: %s", cmdType)
-				}
-
-				if auditAdapter != nil {
-					if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, rule, err == nil); auditErr != nil {
-						mdai.Logger.Error("Failed to write audit event for automation step",
-							zap.String("hubName", event.HubName),
-							zap.String("name", event.Name),
-							zap.String("rule", rule.Name),
-							zap.String("eventCorrelationId", event.CorrelationID),
-							zap.Error(auditErr),
-						)
-					}
-				}
-
-				if err != nil {
-					mdai.Logger.Error("Automation step failed",
-						zap.String("hubName", event.HubName),
-						zap.String("name", event.Name),
-						zap.String("rule", rule.Name),
-						zap.String("eventCorrelationId", event.CorrelationID),
-						zap.Error(err),
-					)
-					return err
-				}
+			if err := processRuleForAlertingEvent(ctx, event, mdai, rule, auditAdapter); err != nil {
+				return err
 			}
 		}
 		return nil
 	}
+}
+
+func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, mdai handlers.MdaiInterface, rule events.Rule, auditAdapter *audit.AuditAdapter) error {
+	mdai.Logger.Info("Processing automation rule", zap.String("rule", rule.Name))
+	for _, cmd := range rule.Commands {
+		cmdType := cmd.Type
+		mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
+		var err error
+		switch cmdType {
+		case "variable.set.add":
+			err = safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdai, cmd, event)
+		case "variable.set.remove":
+			err = safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdai, cmd, event)
+		case "webhook.call":
+			err = safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdai, cmd, event)
+		default:
+			mdai.Logger.Error("Unsupported command type", zap.String("commandType", cmdType))
+			return fmt.Errorf("unsupported command type: %s", cmdType)
+		}
+
+		if auditAdapter != nil {
+			if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, rule, err == nil); auditErr != nil {
+				mdai.Logger.Error("Failed to write audit event for automation step",
+					zap.String("hubName", event.HubName),
+					zap.String("name", event.Name),
+					zap.String("rule", rule.Name),
+					zap.String("eventCorrelationId", event.CorrelationID),
+					zap.Error(auditErr),
+				)
+			}
+		}
+
+		if err != nil {
+			mdai.Logger.Error("Automation step failed",
+				zap.String("hubName", event.HubName),
+				zap.String("name", event.Name),
+				zap.String("rule", rule.Name),
+				zap.String("eventCorrelationId", event.CorrelationID),
+				zap.Error(err),
+			)
+			return err
+		}
+	}
+	return nil
 }
 
 // ProcessVariableEvent handles an MdaiEvent according to configured workflows.
