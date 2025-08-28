@@ -51,7 +51,7 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, conf
 		hubData := automationConfig.Data
 
 		// matches event type which should be alert name plus status with rules keys
-		baseRules := func(eventName string, rulesMap map[string]events.Rule) []events.Rule {
+		matchedRules := func(eventName string, rulesMap map[string]events.Rule) []events.Rule {
 			alertName, alertStatus, _ := strings.Cut(eventName, ".")
 
 			eventCtx := triggers.Context{
@@ -68,11 +68,10 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, conf
 		}
 
 		// TODO change informer logic to cache rules so we don't need to process it here every time
-		rules := baseRules(event.Name, getRulesMap(mdai.Logger, hubData))
+		rules := matchedRules(event.Name, getRulesMap(mdai.Logger, hubData))
 		if len(rules) == 0 {
-			err := fmt.Errorf("no matching configured automation for event: %s", event.Name)
-			mdai.Logger.Error("No configured automation for event", zap.String("type", event.Name), zap.Error(err))
-			return err
+			mdai.Logger.Warn("No configured automation for event, skipping", zap.String("eventID", event.ID), zap.String("eventName", event.Name))
+			return nil
 		}
 
 		// this is temporarily connecting new subjects to old handlers
