@@ -144,7 +144,7 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	}
 
 	setPodName("member1")
-	sub1, err := NewSubscriber(context.Background(), logger, "test-subscriber1")
+	sub1, err := NewSubscriber(t.Context(), logger, "test-subscriber1")
 	require.NoError(t, err)
 	require.NoError(t, sub1.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler1))
 
