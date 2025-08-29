@@ -113,7 +113,7 @@ func readLabels(payloadData map[string]any) (map[string]string, error) {
 
 	labelsMap, ok := labelsRaw.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("payload.labels has type %T, want map[string]interface{}", labelsRaw)
+		return nil, fmt.Errorf("payload.labels has type %T, want map[string]any", labelsRaw)
 	}
 
 	labels := make(map[string]string)
