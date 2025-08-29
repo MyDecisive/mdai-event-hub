@@ -293,7 +293,7 @@ func TestSingleActiveMember(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		pod := fmt.Sprintf("member_%02d", i)
 		setPodName(pod)
-		sub, newSubErr := NewSubscriber(context.Background(), logger, "test")
+		sub, newSubErr := NewSubscriber(t.Context(), logger, "test")
 		require.NoError(t, newSubErr)
 		require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error { return nil }))
 		_ = sub.Close()
