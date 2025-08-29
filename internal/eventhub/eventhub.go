@@ -19,13 +19,16 @@ import (
 	"go.uber.org/zap"
 )
 
-//nolint:ireturn
-func Init(logger *zap.Logger) (eventing.Subscriber, error) {
-	return nats.NewSubscriber(logger, "subscriber-event-hub")
+type EventHubDeps struct {
+	Logger              *zap.Logger
+	Subscriber          *nats.EventSubscriber
+	ConfigMapController *kube.ConfigMapController
+	AuditAdapter        *audit.AuditAdapter
+	Mdai                handlers.MdaiInterface
 }
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
-func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, configMgr *kube.ConfigMapController, auditAdapter *audit.AuditAdapter) eventing.HandlerInvoker {
+func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
 		hubName := event.HubName
 		if hubName == "" {
@@ -41,7 +44,7 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, conf
 			return errors.New("unsupported Alerts event source")
 		}
 
-		automationConfig, err := configMgr.GetConfigMapByHubName(event.HubName)
+		automationConfig, err := mdai.ConfigMapController.GetConfigMapByHubName(event.HubName)
 		if err != nil {
 			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
 		}
@@ -77,7 +80,7 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface, conf
 		// this is temporarily connecting new subjects to old handlers
 		// one event can trigger several rules
 		for _, rule := range rules {
-			if err := processRuleForAlertingEvent(ctx, event, mdai, rule, auditAdapter); err != nil {
+			if err := processRuleForAlertingEvent(ctx, event, mdai, rule, mdai.AuditAdapter); err != nil {
 				return err
 			}
 		}

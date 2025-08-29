@@ -24,7 +24,7 @@ func TestProcessAlertingEvent_NoHubName(t *testing.T) {
 		HubName: "",
 	}
 
-	handler := ProcessAlertingEvent(context.Background(), mdai, nil, nil)
+	handler := ProcessAlertingEvent(context.Background(), mdai)
 	err := handler(event)
 
 	require.Error(t, err)
@@ -40,7 +40,7 @@ func TestProcessAlertingEvent_UnsupportedSource(t *testing.T) {
 		Source:  "not-prometheus",
 	}
 
-	handler := ProcessAlertingEvent(context.Background(), mdai, nil, nil)
+	handler := ProcessAlertingEvent(context.Background(), mdai)
 	err := handler(event)
 
 	require.Error(t, err)

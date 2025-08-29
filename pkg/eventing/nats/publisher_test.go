@@ -80,7 +80,7 @@ func TestElasticGroupDelivery(t *testing.T) {
 
 	for i, id := range []string{"m1", "m2", "m3"} {
 		setPodName(id)
-		sub, err := NewSubscriber(logger, "test-subscriber-"+id)
+		sub, err := NewSubscriber(context.Background(), logger, "test-subscriber-"+id)
 		require.NoError(t, err, "subscriber %d", i)
 		require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler), "subscribe %d", i)
 	}
@@ -144,12 +144,12 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	}
 
 	setPodName("member1")
-	sub1, err := NewSubscriber(logger, "test-subscriber1")
+	sub1, err := NewSubscriber(context.Background(), logger, "test-subscriber1")
 	require.NoError(t, err)
 	require.NoError(t, sub1.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler1))
 
 	setPodName("member2")
-	sub2, err := NewSubscriber(logger, "test-subscriber2")
+	sub2, err := NewSubscriber(context.Background(), logger, "test-subscriber2")
 	require.NoError(t, err)
 	require.NoError(t, sub2.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler2))
 
@@ -211,7 +211,7 @@ func TestDLQForwarding(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a subscriber whose handler always errors
-	sub, err := NewSubscriber(logger, "test-dlq-subscriber")
+	sub, err := NewSubscriber(context.Background(), logger, "test-dlq-subscriber")
 	require.NoError(t, err)
 	err = sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
@@ -248,7 +248,7 @@ func TestDuplicateSuppression(t *testing.T) {
 	delivered := 0
 
 	// Subscriber records each delivery
-	sub, err := NewSubscriber(logger, "test")
+	sub, err := NewSubscriber(context.Background(), logger, "test")
 	require.NoError(t, err)
 	err = sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
@@ -293,7 +293,7 @@ func TestSingleActiveMember(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		pod := fmt.Sprintf("member_%02d", i)
 		setPodName(pod)
-		sub, newSubErr := NewSubscriber(logger, "test")
+		sub, newSubErr := NewSubscriber(context.Background(), logger, "test")
 		require.NoError(t, newSubErr)
 		require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error { return nil }))
 		_ = sub.Close()
@@ -306,7 +306,7 @@ func TestSingleActiveMember(t *testing.T) {
 	setPodName(active)
 	var mu sync.Mutex
 	var received []string
-	sub, err := NewSubscriber(logger, "test")
+	sub, err := NewSubscriber(context.Background(), logger, "test")
 	require.NoError(t, err)
 	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
 		mu.Lock()

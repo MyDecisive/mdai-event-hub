@@ -37,7 +37,7 @@ type EventSubscriber struct {
 	runOnce      sync.Once
 }
 
-func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, error) {
+func NewSubscriber(ctx context.Context, logger *zap.Logger, clientName string) (*EventSubscriber, error) {
 	logger.Info("Initializing NATS subscriber", zap.String("client_name", clientName))
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -47,20 +47,20 @@ func NewSubscriber(logger *zap.Logger, clientName string) (*EventSubscriber, err
 	cfg.Logger = logger
 	cfg.ClientName = clientName
 
-	ctx, cancel := context.WithTimeout(context.Background(), newSubscriberContextTimeout)
+	handshakeCtx, cancel := context.WithTimeout(ctx, newSubscriberContextTimeout)
 	defer cancel()
 
-	conn, js, err := connect(ctx, cfg)
+	conn, js, err := connect(handshakeCtx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
-	if err := ensureStream(ctx, js, cfg); err != nil {
+	if err := ensureStream(handshakeCtx, js, cfg); err != nil {
 		_ = conn.Drain()
 		return nil, fmt.Errorf("ensure stream: %w", err)
 	}
 
-	if err := ensurePCGroup(ctx, js, cfg); err != nil {
+	if err := ensurePCGroup(handshakeCtx, js, cfg); err != nil {
 		_ = conn.Drain()
 		return nil, fmt.Errorf("ensure pcgroup: %w", err)
 	}

@@ -63,7 +63,7 @@ func TestMain_CustomValkeyExpiryEnvVar(t *testing.T) {
 }
 
 func TestCreateLogger(t *testing.T) {
-	logger := createLogger()
+	logger := initLogger()
 	assert.NotNil(t, logger)
 	logger.Info("test message") // No crash = pass
 }
