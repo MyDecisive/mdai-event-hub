@@ -43,7 +43,7 @@ func mustPublish(t *testing.T, pub *EventPublisher, ev eventing.MdaiEvent) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	if err := pub.Publish(ctx, ev); err != nil {
+	if err := pub.Publish(ctx, ev, "alert.mdai.test"); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 }
@@ -80,9 +80,9 @@ func TestElasticGroupDelivery(t *testing.T) {
 
 	for i, id := range []string{"m1", "m2", "m3"} {
 		setPodName(id)
-		sub, err := NewSubscriber(logger, "test-subscriber-"+id)
+		sub, err := NewSubscriber(context.Background(), logger, "test-subscriber-"+id)
 		require.NoError(t, err, "subscriber %d", i)
-		require.NoError(t, sub.Subscribe(t.Context(), handler), "subscribe %d", i)
+		require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler), "subscribe %d", i)
 	}
 
 	for range 5 {
@@ -144,14 +144,14 @@ func TestPartitionKeyConsistency(t *testing.T) {
 	}
 
 	setPodName("member1")
-	sub1, err := NewSubscriber(logger, "test-subscriber1")
+	sub1, err := NewSubscriber(t.Context(), logger, "test-subscriber1")
 	require.NoError(t, err)
-	require.NoError(t, sub1.Subscribe(t.Context(), handler1))
+	require.NoError(t, sub1.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler1))
 
 	setPodName("member2")
-	sub2, err := NewSubscriber(logger, "test-subscriber2")
+	sub2, err := NewSubscriber(context.Background(), logger, "test-subscriber2")
 	require.NoError(t, err)
-	require.NoError(t, sub2.Subscribe(t.Context(), handler2))
+	require.NoError(t, sub2.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", handler2))
 
 	const count = 5
 	for range count {
@@ -206,14 +206,14 @@ func TestDLQForwarding(t *testing.T) {
 		}
 	}(nc)
 
-	dlqSubject := pub.cfg.Subject + ".dlq"
+	dlqSubject := "events.alert.dlq"
 	dlqSub, err := nc.SubscribeSync(dlqSubject)
 	require.NoError(t, err)
 
 	// Create a subscriber whose handler always errors
-	sub, err := NewSubscriber(logger, "test-dlq-subscriber")
+	sub, err := NewSubscriber(t.Context(), logger, "test-dlq-subscriber")
 	require.NoError(t, err)
-	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
+	err = sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
 	})
 	require.NoError(t, err)
@@ -248,9 +248,9 @@ func TestDuplicateSuppression(t *testing.T) {
 	delivered := 0
 
 	// Subscriber records each delivery
-	sub, err := NewSubscriber(logger, "test")
+	sub, err := NewSubscriber(context.Background(), logger, "test")
 	require.NoError(t, err)
-	err = sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
+	err = sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		delivered++
 		mu.Unlock()
@@ -293,9 +293,9 @@ func TestSingleActiveMember(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		pod := fmt.Sprintf("member_%02d", i)
 		setPodName(pod)
-		sub, newSubErr := NewSubscriber(logger, "test")
+		sub, newSubErr := NewSubscriber(t.Context(), logger, "test")
 		require.NoError(t, newSubErr)
-		require.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error { return nil }))
+		require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error { return nil }))
 		_ = sub.Close()
 	}
 
@@ -306,9 +306,9 @@ func TestSingleActiveMember(t *testing.T) {
 	setPodName(active)
 	var mu sync.Mutex
 	var received []string
-	sub, err := NewSubscriber(logger, "test")
+	sub, err := NewSubscriber(t.Context(), logger, "test")
 	require.NoError(t, err)
-	require.NoError(t, sub.Subscribe(t.Context(), func(ev eventing.MdaiEvent) error {
+	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		received = append(received, ev.Name)
 		mu.Unlock()
@@ -387,7 +387,7 @@ func TestPublishEventIDGeneration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event)
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			require.NoError(t, err, tt.desc)
 
 			if tt.hasID {
@@ -452,7 +452,7 @@ func TestPublishTimestampGeneration(t *testing.T) {
 			defer cancel()
 
 			beforePublish := time.Now().UTC()
-			err := pub.Publish(ctx, tt.event)
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			afterPublish := time.Now().UTC()
 
 			require.NoError(t, err, tt.desc)
@@ -491,7 +491,7 @@ func TestPublishSubjectGeneration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = pub.Publish(ctx, event)
+	err = pub.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err)
 }
 
@@ -555,7 +555,7 @@ func TestPublishHeaderGeneration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event)
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 			require.NoError(t, err, tt.desc)
 		})
 	}
@@ -612,7 +612,7 @@ func TestPublishJSONSerialization(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			err := pub.Publish(ctx, tt.event)
+			err := pub.Publish(ctx, tt.event, "alert.test.test")
 
 			if tt.wantErr {
 				assert.Error(t, err, tt.desc)
@@ -694,9 +694,9 @@ func TestNewPublisherStreamCreation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = pub1.Publish(ctx, event)
+	err = pub1.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err, "first publisher should publish successfully")
 
-	err = pub2.Publish(ctx, event)
+	err = pub2.Publish(ctx, event, "alert.test.test")
 	require.NoError(t, err, "second publisher should publish successfully")
 }

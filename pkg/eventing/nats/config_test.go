@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,21 +23,9 @@ func TestSafeToken(t *testing.T) {
 		"valid_token": "valid_token",
 	}
 	for input, want := range cases {
-		got := safeToken(input)
+		got := SafeToken(input)
 		assert.Equal(t, want, got, "safeToken(%q)", input)
 	}
-}
-
-func TestSubjectFromEvent(t *testing.T) {
-	prefix := "prefix"
-	ev := eventing.MdaiEvent{
-		HubName: "hub.one",
-		Source:  "source two",
-		Name:    "event.three",
-	}
-	want := strings.Join([]string{prefix, "hub_one", "source_two", "event_three"}, ".")
-	got := subjectFromEvent(prefix, ev)
-	assert.Equal(t, want, got)
 }
 
 func TestFirstNonEmpty(t *testing.T) {
@@ -276,9 +262,9 @@ func TestGetMemberIDs(t *testing.T) {
 		},
 		{
 			name:     "handles mixed case",
-			podName:  "Pod-Name-ABC",
+			podName:  "Pod-Type-ABC",
 			hostname: "",
-			expected: func(result string) bool { return result == "Pod-Name-ABC" },
+			expected: func(result string) bool { return result == "Pod-Type-ABC" },
 			desc:     "should preserve case",
 		},
 		{

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -77,17 +78,15 @@ func TestHandleAddNoisyServiceToSet(t *testing.T) {
 	event := eventing.MdaiEvent{
 		ID:            "testId",
 		Name:          "testName",
-		Payload:       `{"key":"bazfoo"}`,
+		Payload:       `{"labels":{"key":"bazfoo"}}`,
 		Source:        "testSource",
 		SourceID:      "testSourceId",
 		CorrelationID: "bob",
 		HubName:       "barbaz",
 	}
-	args := map[string]string{
-		"variable_ref":    "foobar",
-		"payload_val_ref": "key",
-	}
-	require.NoError(t, handleAddNoisyServiceToSet(mdaiInterface, event, args))
+	args := json.RawMessage(`{"set":"foobar","value":"key"}`)
+
+	require.NoError(t, HandleAddNoisyServiceToSet(mdaiInterface, event, args))
 	assert.Contains(t, mockHandlerAdapter.Calls["AddElementToSet"], map[string]string{
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",
@@ -107,17 +106,15 @@ func TestHandleRemoveNoisyServiceFromSet(t *testing.T) {
 	event := eventing.MdaiEvent{
 		ID:            "testId",
 		Name:          "testName",
-		Payload:       `{"key":"bazfoo"}`,
+		Payload:       `{"labels":{"key":"bazfoo"}}`,
 		Source:        "testSource",
 		SourceID:      "testSourceId",
 		CorrelationID: "bob",
 		HubName:       "barbaz",
 	}
-	args := map[string]string{
-		"variable_ref":    "foobar",
-		"payload_val_ref": "key",
-	}
-	require.NoError(t, handleRemoveNoisyServiceFromSet(mdaiInterface, event, args))
+	args := json.RawMessage(`{"set":"foobar","value":"key"}`)
+
+	require.NoError(t, HandleRemoveNoisyServiceFromSet(mdaiInterface, event, args))
 	assert.Contains(t, mockHandlerAdapter.Calls["RemoveElementFromSet"], map[string]string{
 		"variableKey":   "foobar",
 		"hubName":       "barbaz",
@@ -305,7 +302,10 @@ func TestBuildSlackPayload(t *testing.T) {
 				Name:      "barbaz",
 				Timestamp: time.Date(2021, time.September, 21, 9, 21, 9, 21, time.UTC),
 			},
-			payload: map[string]any{},
+			payload: map[string]any{
+				"status": "whoa",
+				"labels": map[string]any{},
+			},
 			expected: SlackPayload{
 				Text: "MDAI Hub Event - foobar - barbaz",
 				Blocks: []map[string]any{
@@ -323,6 +323,14 @@ func TestBuildSlackPayload(t *testing.T) {
 								"type": "mrkdwn",
 								"text": "*Alert timestamp* - 2021-09-21 09:21:09.000000021 +0000 UTC",
 							},
+							{
+								"type": "mrkdwn",
+								"text": "*alertname* - Unknown",
+							},
+							{
+								"type": "mrkdwn",
+								"text": "*status* - whoa",
+							},
 						},
 					},
 				},
@@ -330,12 +338,10 @@ func TestBuildSlackPayload(t *testing.T) {
 		}, {
 			desc: "build more complex slack payload",
 			args: map[string]string{
-				"message":                   "SLACKY MCSLACKFACE LOL",
-				"payload_val_ref_primary":   "lol",
-				"payload_val_ref_secondary": "lmao",
-				"payload_val_ref_tertiary":  "even",
-				"link_text":                 "CLICK HERE FOR FREE IPAD!",
-				"link_url":                  "https://www.example.com",
+				"labels_val_ref_primary": "lol",
+				"message":                "SLACKY MCSLACKFACE LOL",
+				"link_text":              "CLICK HERE FOR FREE IPAD!",
+				"link_url":               "https://www.example.com",
 			},
 			event: eventing.MdaiEvent{
 				HubName:   "foobaz",
@@ -343,9 +349,11 @@ func TestBuildSlackPayload(t *testing.T) {
 				Timestamp: time.Date(2021, time.September, 21, 9, 21, 9, 21, time.UTC),
 			},
 			payload: map[string]any{
-				"lol":  "wut",
-				"lmao": "k.",
-				"even": "whoa",
+				"status": "whoa",
+				"labels": map[string]any{
+					"lol":       "wut",
+					"alertname": "k.",
+				},
 			},
 			expected: SlackPayload{
 				Text: "SLACKY MCSLACKFACE LOL",
@@ -370,11 +378,11 @@ func TestBuildSlackPayload(t *testing.T) {
 							},
 							{
 								"type": "mrkdwn",
-								"text": "*lmao* - k.",
+								"text": "*alertname* - k.",
 							},
 							{
 								"type": "mrkdwn",
-								"text": "*even* - whoa",
+								"text": "*status* - whoa",
 							},
 						},
 					},
@@ -405,4 +413,42 @@ func TestBuildSlackPayload(t *testing.T) {
 			assert.Equal(t, tc.expected, actual)
 		})
 	}
+}
+
+func TestProcessEventPayload_Success(t *testing.T) {
+	validJSON := `{"key1":"value1","key2":42,"nested":{"sub":"val"}}`
+	event := eventing.MdaiEvent{
+		ID:      "e1",
+		Name:    "test",
+		HubName: "hub1",
+		Payload: validJSON,
+	}
+
+	result, err := ProcessEventPayload(event)
+	require.NoError(t, err, "expected no error for valid JSON payload")
+
+	assert.Contains(t, result, "key1")
+	assert.Contains(t, result, "key2")
+	assert.Contains(t, result, "nested")
+
+	assert.Equal(t, "value1", result["key1"])
+	assert.InDelta(t, float64(42), result["key2"], 0.001)
+	nested, ok := result["nested"].(map[string]any)
+	assert.True(t, ok, "expected nested to be a map[string]any")
+	assert.Equal(t, "val", nested["sub"])
+}
+
+func TestProcessEventPayload_InvalidJSON(t *testing.T) {
+	invalidJSON := `{"key1":"value1", "key2":}`
+	event := eventing.MdaiEvent{
+		ID:      "e2",
+		Name:    "test-invalid",
+		HubName: "hub2",
+		Payload: invalidJSON,
+	}
+
+	result, err := ProcessEventPayload(event)
+	assert.Nil(t, result, "expected result to be nil on invalid JSON")
+	require.Error(t, err, "expected an error for invalid JSON payload")
+	assert.Contains(t, err.Error(), "failed to unmarshal payload")
 }

@@ -7,37 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
+	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
-
-const (
-	HandleAddNoisyServiceToSet      HandlerName = "HandleAddNoisyServiceToSet"
-	HandleRemoveNoisyServiceFromSet HandlerName = "HandleRemoveNoisyServiceFromSet"
-	HandleNoisyServiceAlert         HandlerName = "HandleNoisyServiceAlert"
-	HandleCallSlackWebhook          HandlerName = "HandleCallSlackWebhook"
-)
-
-func GetDefaultHandlers() HandlerMap {
-	return HandlerMap{
-		HandleAddNoisyServiceToSet:      handleAddNoisyServiceToSet,
-		HandleRemoveNoisyServiceFromSet: handleRemoveNoisyServiceFromSet,
-		HandleNoisyServiceAlert:         HandleUpdateSetByComparison,
-		HandleCallSlackWebhook:          HandleCallSlackWebhookFn,
-	}
-}
-
-// GetSupportedHandlers Go doesn't support dynamic accessing of exports. So this is a workaround.
-// The handler library will have to export a map that can be dynamically accessed.
-// To enforce this, handlers are declared with a lower case first character so they
-// are not exported directly but can only be accessed through the map.
-func GetSupportedHandlers(h HandlerMap) HandlerMap {
-	if h != nil {
-		return h
-	}
-	return GetDefaultHandlers()
-}
 
 func ProcessEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	if event.Payload == "" {
@@ -54,13 +33,6 @@ func ProcessEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	return payloadData, nil
 }
 
-func getArgsValueWithDefault(key string, defaultValue string, args map[string]string) string {
-	if val, ok := args[key]; ok {
-		return val
-	}
-	return defaultValue
-}
-
 func getString(m map[string]any, key string) (string, error) {
 	v, ok := m[key]
 	if !ok {
@@ -75,88 +47,85 @@ func getString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func HandleUpdateSetByComparison(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
-	ctx := context.Background()
+type setOp func(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error
+
+func doAdd(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error {
+	return mdai.Data.AddElementToSet(ctx, set, hub, value, corr)
+}
+
+func doRemove(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error {
+	return mdai.Data.RemoveElementFromSet(ctx, set, hub, value, corr)
+}
+
+func HandleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
+	return handleSetMembership(mdai, event, raw, "variable.set.add", doAdd)
+}
+
+func HandleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
+	return handleSetMembership(mdai, event, raw, "variable.set.remove", doRemove)
+}
+
+func handleSetMembership(
+	mdai MdaiInterface,
+	event eventing.MdaiEvent,
+	raw json.RawMessage,
+	opName string,
+	op setOp, // TODO review if opName and op should be unified
+) error {
+	var in mdaiv1.SetAction
+	if err := DecodeInputs(raw, &in); err != nil {
+		return fmt.Errorf("%s: decode SetAction: %w", opName, err)
+	}
+
 	payloadData, err := ProcessEventPayload(event)
 	if err != nil {
-		return fmt.Errorf("failed to process payload: %w", err)
+		return fmt.Errorf("%s: process payload: %w", opName, err)
 	}
-	mdai.Logger.Debug("handleNoisyServiceList ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
 
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
-	payloadComparableKey := getArgsValueWithDefault("payload_comparable_ref", "status", args)
-	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
+	mdai.Logger.Debug(opName,
+		zap.Object("event", &event),
+		zap.Reflect("payload", payloadData),
+		zap.Reflect("input", in),
+	)
 
-	comp, err := getString(payloadData, payloadComparableKey)
+	labels, err := readLabels(payloadData) // map[string]any
 	if err != nil {
-		return fmt.Errorf("failed to get payload comparable key: %w", err)
-	}
-	payloadValue, err := getString(payloadData, payloadValueKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload value key: %w", err)
+		return fmt.Errorf("%s: %w", opName, err)
 	}
 
-	switch comp {
-	case "firing":
-		if err := mdai.Data.AddElementToSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationID); err != nil {
-			return err
-		}
-	case "resolved":
-		if err := mdai.Data.RemoveElementFromSet(ctx, variableRef, event.HubName, payloadValue, event.CorrelationID); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unknown alert status: %s", comp)
+	val, ok := labels[in.Value]
+	if !ok {
+		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Value)
+	}
+
+	ctx := context.Background()
+	if err := op(ctx, mdai, in.Set, event.HubName, val, event.CorrelationID); err != nil {
+		return fmt.Errorf("%s failed: %w", opName, err)
 	}
 	return nil
 }
 
-func handleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
-	ctx := context.Background()
-	payloadData, err := ProcessEventPayload(event)
-	if err != nil {
-		return fmt.Errorf("failed to process payload: %w", err)
-	}
-	mdai.Logger.Debug("handleAddNoisyServiceToSet ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
-
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
-	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
-
-	value, err := getString(payloadData, payloadValueKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload value key: %w", err)
+func readLabels(payloadData map[string]any) (map[string]string, error) {
+	labelsRaw, ok := payloadData["labels"]
+	if !ok {
+		return nil, errors.New("labels not found in payload")
 	}
 
-	if err := mdai.Data.AddElementToSet(ctx, variableRef, event.HubName, value, event.CorrelationID); err != nil {
-		return err
-	}
-	// TODO: Debug Log new var val
-
-	return nil
-}
-
-func handleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
-	ctx := context.Background()
-	payloadData, err := ProcessEventPayload(event)
-	if err != nil {
-		return fmt.Errorf("failed to process payload: %w", err)
-	}
-	mdai.Logger.Debug("handleRemoveNoisyServiceFromSet ", zap.Object("event", &event), zap.Reflect("payload", payloadData), zap.Reflect("args", args))
-
-	payloadValueKey := getArgsValueWithDefault("payload_val_ref", "service_name", args)
-	variableRef := getArgsValueWithDefault("variable_ref", "service_list", args)
-
-	value, err := getString(payloadData, payloadValueKey)
-	if err != nil {
-		return fmt.Errorf("failed to get payload value key: %w", err)
+	labelsMap, ok := labelsRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("payload.labels has type %T, want map[string]any", labelsRaw)
 	}
 
-	if err := mdai.Data.RemoveElementFromSet(ctx, variableRef, event.HubName, value, event.CorrelationID); err != nil {
-		return err
+	labels := make(map[string]string)
+	for k, v := range labelsMap {
+		strValue, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("label value for key %s is not a string", k)
+		}
+		labels[k] = strValue
 	}
-	// TODO: Debug Log new var val
 
-	return nil
+	return labels, nil
 }
 
 func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event eventing.MdaiEvent) error {
@@ -288,11 +257,22 @@ type SlackPayload struct {
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args map[string]string) error {
+func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
+	var in mdaiv1.CallWebhookAction
+	if err := DecodeInputs(raw, &in); err != nil {
+		return fmt.Errorf("decode call.webhook: %w", err)
+	}
+
 	ctx := context.Background()
-	webhookURL, webhookURLExists := args["webhook_url"]
-	if !webhookURLExists || webhookURL == "" {
-		return errors.New("webhook_url is a required arg value, cannot call webhook")
+	webhookURL, err := resolveStringOrFrom(ctx, mdai.Kube, mdai.Namespace, in.URL)
+	if err != nil {
+		return fmt.Errorf("resolve webhook url: %w", err)
+	}
+	if webhookURL == "" {
+		return errors.New("webhook_url must be a non-empty string")
+	}
+	if _, err = url.ParseRequestURI(webhookURL); err != nil {
+		return fmt.Errorf("invalid webhook url: %w", err)
 	}
 
 	payloadData, err := ProcessEventPayload(event)
@@ -300,7 +280,7 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 		return fmt.Errorf("failed to process payload: %w", err)
 	}
 
-	payload, err := buildSlackPayload(args, event, payloadData)
+	payload, err := buildSlackPayload(in.TemplateValues, event, payloadData)
 	if err != nil {
 		return err
 	}
@@ -331,20 +311,75 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, args
 	return nil
 }
 
-func addPayloadField(fields []map[string]string, args map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
-	payloadKey, exists := args[key]
-	if !exists || payloadKey == "" {
-		return fields, nil
+func resolveStringOrFrom(ctx context.Context, kube kubernetes.Interface, namespace string, stringOrFrom mdaiv1.StringOrFrom) (string, error) {
+	if stringOrFrom.Value != nil {
+		return strings.TrimSpace(*stringOrFrom.Value), nil
+	}
+	if stringOrFrom.ValueFrom == nil {
+		return "", errors.New("neither value nor valueFrom set")
 	}
 
-	payloadValue, err := getString(payloadData, payloadKey)
+	if secretKeyRef := stringOrFrom.ValueFrom.SecretKeyRef; secretKeyRef != nil {
+		return readSecretKey(ctx, kube, namespace, *secretKeyRef)
+	}
+	if configMapKeyRef := stringOrFrom.ValueFrom.ConfigMapKeyRef; configMapKeyRef != nil {
+		return readConfigMapKey(ctx, kube, namespace, *configMapKeyRef)
+	}
+	return "", errors.New("valueFrom has neither secretKeyRef nor configMapKeyRef")
+}
+
+func readSecretKey(ctx context.Context, kube kubernetes.Interface, ns string, ref corev1.SecretKeySelector) (string, error) {
+	sec, err := kube.CoreV1().Secrets(ns).Get(ctx, ref.Name, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get %s from payload with error: %w", payloadKey, err)
+		return "", fmt.Errorf("read secret %q: %w", ref.Name, err)
+	}
+	raw, ok := sec.Data[ref.Key]
+	if !ok {
+		return "", fmt.Errorf("secret %q missing key %q", ref.Name, ref.Key)
+	}
+	return strings.TrimSpace(string(raw)), nil
+}
+
+func readConfigMapKey(ctx context.Context, kube kubernetes.Interface, ns string, ref corev1.ConfigMapKeySelector) (string, error) {
+	cm, err := kube.CoreV1().ConfigMaps(ns).Get(ctx, ref.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("read configmap %q: %w", ref.Name, err)
+	}
+	if value, ok := cm.Data[ref.Key]; ok {
+		return strings.TrimSpace(value), nil
+	}
+	if binaryData, ok := cm.BinaryData[ref.Key]; ok {
+		return strings.TrimSpace(string(binaryData)), nil
+	}
+	return "", fmt.Errorf("configmap %q missing key %q", ref.Name, ref.Key)
+}
+
+func addPayloadFieldByKey(fields []map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
+	payloadValue, err := getString(payloadData, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s from payload with error: %w", key, err)
 	}
 
 	return append(fields, map[string]string{
 		"type": "mrkdwn",
-		"text": fmt.Sprintf("*%s* - %s", payloadKey, payloadValue),
+		"text": fmt.Sprintf("*%s* - %s", key, payloadValue),
+	}), nil
+}
+
+func addPayloadFieldByKeyFromLabels(fields []map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
+	labels, err := readLabels(payloadData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read labels from payload with error: %w", err)
+	}
+
+	payloadValue, ok := labels[key]
+	if !ok {
+		payloadValue = "Unknown"
+	}
+
+	return append(fields, map[string]string{
+		"type": "mrkdwn",
+		"text": fmt.Sprintf("*%s* - %s", key, payloadValue),
 	}), nil
 }
 
@@ -374,13 +409,17 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 	}
 
 	var err error
-	if fields, err = addPayloadField(fields, args, payloadData, "payload_val_ref_primary"); err != nil {
+	// FIXME in case of error append n/a instead of error and log error
+	key, ok := args["labels_val_ref_primary"]
+	if ok {
+		if fields, err = addPayloadFieldByKeyFromLabels(fields, payloadData, key); err != nil {
+			return SlackPayload{}, err
+		}
+	}
+	if fields, err = addPayloadFieldByKeyFromLabels(fields, payloadData, "alertname"); err != nil {
 		return SlackPayload{}, err
 	}
-	if fields, err = addPayloadField(fields, args, payloadData, "payload_val_ref_secondary"); err != nil {
-		return SlackPayload{}, err
-	}
-	if fields, err = addPayloadField(fields, args, payloadData, "payload_val_ref_tertiary"); err != nil {
+	if fields, err = addPayloadFieldByKey(fields, payloadData, "status"); err != nil {
 		return SlackPayload{}, err
 	}
 
@@ -394,8 +433,9 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 	linkText, linkTextExists := args["link_text"]
 	linkURL, linkURLExists := args["link_url"]
 	if linkURLExists && linkURL != "" {
-		if !linkTextExists || linkText == "" {
-			linkText = "See more"
+		linkTextStr := "See more"
+		if linkTextExists {
+			linkTextStr = linkText
 		}
 		payload.Blocks = append(payload.Blocks, map[string]any{
 			"type": "actions",
@@ -404,7 +444,7 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 					"type": "button",
 					"text": map[string]string{
 						"type": "plain_text",
-						"text": linkText,
+						"text": linkTextStr,
 					},
 					"style": "primary",
 					"url":   linkURL,
@@ -413,4 +453,10 @@ func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payload
 		})
 	}
 	return payload, nil
+}
+
+func DecodeInputs[T any](raw json.RawMessage, out *T) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(out)
 }
