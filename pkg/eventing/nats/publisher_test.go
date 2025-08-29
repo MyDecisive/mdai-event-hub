@@ -306,7 +306,7 @@ func TestSingleActiveMember(t *testing.T) {
 	setPodName(active)
 	var mu sync.Mutex
 	var received []string
-	sub, err := NewSubscriber(context.Background(), logger, "test")
+	sub, err := NewSubscriber(t.Context(), logger, "test")
 	require.NoError(t, err)
 	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
