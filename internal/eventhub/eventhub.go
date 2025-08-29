@@ -95,6 +95,7 @@ func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, 
 		mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
 		var err error
 		switch cmdType {
+		// TODO make a data-core constants
 		case "variable.set.add":
 			err = safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdai, cmd, event)
 		case "variable.set.remove":
@@ -142,10 +143,9 @@ func ProcessVariableEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 			return errors.New("unsupported manual variable update event source")
 		}
 
-		// TODO issue a command event here as well
-
-		err := handlers.HandleManualVariablesActions(ctx, mdai, event)
-		if err != nil {
+		// TODO issue a command event here
+		if err := handlers.HandleManualVariablesActions(ctx, mdai, event); err != nil {
+			mdai.Logger.Error("Error processing manual variable update event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name), zap.String("eventID", event.ID), zap.Error(err))
 			return err
 		}
 

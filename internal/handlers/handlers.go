@@ -70,7 +70,7 @@ func handleSetMembership(
 	event eventing.MdaiEvent,
 	raw json.RawMessage,
 	opName string,
-	op setOp,
+	op setOp, // TODO review if opName and op should be unified
 ) error {
 	var in mdaiv1.SetAction
 	if err := DecodeInputs(raw, &in); err != nil {

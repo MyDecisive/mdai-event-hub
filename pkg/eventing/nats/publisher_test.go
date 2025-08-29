@@ -308,7 +308,7 @@ func TestSingleActiveMember(t *testing.T) {
 	var received []string
 	sub, err := NewSubscriber(t.Context(), logger, "test")
 	require.NoError(t, err)
-	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alerts", func(ev eventing.MdaiEvent) error {
+	require.NoError(t, sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error {
 		mu.Lock()
 		received = append(received, ev.Name)
 		mu.Unlock()
