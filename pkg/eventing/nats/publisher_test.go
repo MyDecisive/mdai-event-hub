@@ -211,7 +211,7 @@ func TestDLQForwarding(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a subscriber whose handler always errors
-	sub, err := NewSubscriber(context.Background(), logger, "test-dlq-subscriber")
+	sub, err := NewSubscriber(t.Context(), logger, "test-dlq-subscriber")
 	require.NoError(t, err)
 	err = sub.Subscribe(t.Context(), eventing.AlertConsumerGroupName, "alert", func(ev eventing.MdaiEvent) error {
 		return errors.New("handler error")
