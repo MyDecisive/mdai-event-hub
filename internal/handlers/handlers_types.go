@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/decisiveai/mdai-data-core/audit"
+	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/kube"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 )

@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
+	"github.com/decisiveai/mdai-data-core/eventing"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"

@@ -10,18 +10,18 @@ import (
 	"time"
 
 	"github.com/decisiveai/mdai-data-core/audit"
-	"github.com/decisiveai/mdai-data-core/events"
-	"github.com/decisiveai/mdai-data-core/events/triggers"
+	"github.com/decisiveai/mdai-data-core/eventing"
+	"github.com/decisiveai/mdai-data-core/eventing/rule"
+	"github.com/decisiveai/mdai-data-core/eventing/subscriber"
+	"github.com/decisiveai/mdai-data-core/eventing/triggers"
 	"github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing/nats"
 	"go.uber.org/zap"
 )
 
 type EventHubDeps struct {
 	Logger              *zap.Logger
-	Subscriber          *nats.EventSubscriber
+	Subscriber          subscriber.Subscriber
 	ConfigMapController *kube.ConfigMapController
 	AuditAdapter        *audit.AuditAdapter
 	Mdai                handlers.MdaiInterface
@@ -54,17 +54,17 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 		hubData := automationConfig.Data
 
 		// matches event type which should be alert name plus status with rules keys
-		matchedRules := func(eventName string, rulesMap map[string]events.Rule) []events.Rule {
+		matchedRules := func(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
 			alertName, alertStatus, _ := strings.Cut(eventName, ".")
 
 			eventCtx := triggers.Context{
 				Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
 			}
 
-			matched := make([]events.Rule, 0, len(rulesMap))
-			for _, rule := range rulesMap {
-				if at, ok := rule.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
-					matched = append(matched, rule)
+			matched := make([]rule.Rule, 0, len(rulesMap))
+			for _, r := range rulesMap {
+				if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
+					matched = append(matched, r)
 				}
 			}
 			return matched
@@ -79,8 +79,8 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 
 		// this is temporarily connecting new subjects to old handlers
 		// one event can trigger several rules
-		for _, rule := range rules {
-			if err := processRuleForAlertingEvent(ctx, event, mdai, rule, mdai.AuditAdapter); err != nil {
+		for _, r := range rules {
+			if err := processRuleForAlertingEvent(ctx, event, mdai, r, mdai.AuditAdapter); err != nil {
 				return err
 			}
 		}
@@ -88,9 +88,9 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 	}
 }
 
-func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, mdai handlers.MdaiInterface, rule events.Rule, auditAdapter *audit.AuditAdapter) error {
-	mdai.Logger.Info("Processing automation rule", zap.String("rule", rule.Name))
-	for _, cmd := range rule.Commands {
+func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, mdai handlers.MdaiInterface, r rule.Rule, auditAdapter *audit.AuditAdapter) error {
+	mdai.Logger.Info("Processing automation rule", zap.String("rule", r.Name))
+	for _, cmd := range r.Commands {
 		cmdType := cmd.Type
 		mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
 		var err error
@@ -108,11 +108,11 @@ func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, 
 		}
 
 		if auditAdapter != nil {
-			if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, rule, err == nil); auditErr != nil {
+			if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, r, err == nil); auditErr != nil {
 				mdai.Logger.Error("Failed to write audit event for automation step",
 					zap.String("hubName", event.HubName),
 					zap.String("name", event.Name),
-					zap.String("rule", rule.Name),
+					zap.String("rule", r.Name),
 					zap.String("eventCorrelationId", event.CorrelationID),
 					zap.Error(auditErr),
 				)
@@ -123,7 +123,7 @@ func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, 
 			mdai.Logger.Error("Automation step failed",
 				zap.String("hubName", event.HubName),
 				zap.String("name", event.Name),
-				zap.String("rule", rule.Name),
+				zap.String("rule", r.Name),
 				zap.String("eventCorrelationId", event.CorrelationID),
 				zap.Error(err),
 			)
@@ -154,7 +154,7 @@ func ProcessVariableEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 	}
 }
 
-func safePerformAutomationStep(handlerFn handlers.HandlerFunc, mdai handlers.MdaiInterface, command events.Command, event eventing.MdaiEvent) (err error) {
+func safePerformAutomationStep(handlerFn handlers.HandlerFunc, mdai handlers.MdaiInterface, command rule.Command, event eventing.MdaiEvent) (err error) {
 	// handle panics
 	defer func() {
 		if r := recover(); r != nil {
@@ -178,7 +178,7 @@ func safePerformAutomationStep(handlerFn handlers.HandlerFunc, mdai handlers.Mda
 	return nil
 }
 
-func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, rule events.Rule, automationSucceeded bool) error {
+func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, r rule.Rule, automationSucceeded bool) error {
 	eventMap := map[string]string{
 		"id":                   event.ID,
 		"name":                 event.Name,
@@ -189,27 +189,27 @@ func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, audi
 		"correlation_id":       event.CorrelationID,
 		"hub_name":             event.HubName,
 		"automation_succeeded": strconv.FormatBool(automationSucceeded),
-		"automation_name":      rule.Name,
+		"automation_name":      r.Name,
 	}
 	logger.Info(
 		"AUDIT: MdaiEvent handled",
 		zap.String("mdai-logstream", "audit"),
 		zap.Object("mdaiEvent", &event),
 		zap.Bool("automation_succeeded", automationSucceeded),
-		zap.String("automation_name", rule.Name),
+		zap.String("automation_name", r.Name),
 	)
 	return auditAdapter.InsertAuditLogEventFromMap(ctx, eventMap)
 }
 
-func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]events.Rule {
-	result := make(map[string]events.Rule, len(hubData))
+func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.Rule {
+	result := make(map[string]rule.Rule, len(hubData))
 
 	for ruleName, ruleJSON := range hubData { // key is the rule name
 		// Decode into a wire struct first; Trigger stays raw.
 		var wireRule struct {
-			Name     string           `json:"name"`
-			Trigger  json.RawMessage  `json:"trigger"`
-			Commands []events.Command `json:"commands"`
+			Name     string          `json:"name"`
+			Trigger  json.RawMessage `json:"trigger"`
+			Commands []rule.Command  `json:"commands"`
 		}
 		dec := json.NewDecoder(strings.NewReader(ruleJSON))
 		dec.DisallowUnknownFields()
@@ -224,15 +224,15 @@ func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]event
 			continue
 		}
 
-		var rule events.Rule
-		rule.Name = wireRule.Name
-		if rule.Name == "" {
-			rule.Name = ruleName // fall back to ConfigMap key
+		var r rule.Rule
+		r.Name = wireRule.Name
+		if r.Name == "" {
+			r.Name = ruleName // fall back to ConfigMap key
 		}
-		rule.Trigger = trigger // store pointer so only one assertion form exists later
-		rule.Commands = wireRule.Commands
+		r.Trigger = trigger // store pointer so only one assertion form exists later
+		r.Commands = wireRule.Commands
 
-		result[ruleName] = rule
+		result[ruleName] = r
 	}
 
 	return result

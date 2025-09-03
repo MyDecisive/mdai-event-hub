@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
+	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -16,7 +16,7 @@ type MockHandlerAdapter struct {
 	Calls map[string][]map[string]string
 }
 
-func (mh *MockHandlerAdapter) AddElementToSet(ctx context.Context, variableKey string, hubName string, value string, correlationID string) error {
+func (mh *MockHandlerAdapter) AddElementToSet(_ context.Context, variableKey string, hubName string, value string, correlationID string) error {
 	mh.Calls["AddElementToSet"] = append(mh.Calls["AddElementToSet"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -26,7 +26,7 @@ func (mh *MockHandlerAdapter) AddElementToSet(ctx context.Context, variableKey s
 	return nil
 }
 
-func (mh *MockHandlerAdapter) RemoveElementFromSet(ctx context.Context, variableKey string, hubName string, value string, correlationID string) error {
+func (mh *MockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey string, hubName string, value string, correlationID string) error {
 	mh.Calls["RemoveElementFromSet"] = append(mh.Calls["RemoveElementFromSet"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -36,7 +36,7 @@ func (mh *MockHandlerAdapter) RemoveElementFromSet(ctx context.Context, variable
 	return nil
 }
 
-func (mh *MockHandlerAdapter) AddSetMapElement(ctx context.Context, variableKey string, hubName string, field string, value string, correlationID string) error {
+func (mh *MockHandlerAdapter) AddSetMapElement(_ context.Context, variableKey string, hubName string, field string, value string, correlationID string) error {
 	mh.Calls["AddSetMapElement"] = append(mh.Calls["AddSetMapElement"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -47,7 +47,7 @@ func (mh *MockHandlerAdapter) AddSetMapElement(ctx context.Context, variableKey 
 	return nil
 }
 
-func (mh *MockHandlerAdapter) RemoveElementFromMap(ctx context.Context, variableKey string, hubName string, field string, correlationID string) error {
+func (mh *MockHandlerAdapter) RemoveElementFromMap(_ context.Context, variableKey string, hubName string, field string, correlationID string) error {
 	mh.Calls["RemoveElementFromMap"] = append(mh.Calls["RemoveElementFromMap"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -57,7 +57,7 @@ func (mh *MockHandlerAdapter) RemoveElementFromMap(ctx context.Context, variable
 	return nil
 }
 
-func (mh *MockHandlerAdapter) SetStringValue(ctx context.Context, variableKey string, hubName string, value string, correlationID string) error {
+func (mh *MockHandlerAdapter) SetStringValue(_ context.Context, variableKey string, hubName string, value string, correlationID string) error {
 	mh.Calls["SetStringValue"] = append(mh.Calls["SetStringValue"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,

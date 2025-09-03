@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decisiveai/mdai-data-core/events"
-	"github.com/decisiveai/mdai-data-core/events/triggers"
+	"github.com/decisiveai/mdai-data-core/eventing"
+	"github.com/decisiveai/mdai-data-core/eventing/rule"
+	"github.com/decisiveai/mdai-data-core/eventing/triggers"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -49,7 +49,7 @@ func TestProcessAlertingEvent_UnsupportedSource(t *testing.T) {
 
 func TestSafePerformAutomationStep_Panic(t *testing.T) {
 	mdai := handlers.MdaiInterface{Logger: zap.NewNop()}
-	cmd := events.Command{Type: "webhook.call"}
+	cmd := rule.Command{Type: "webhook.call"}
 
 	panicFn := func(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ json.RawMessage) error {
 		panic("boom")
@@ -69,7 +69,7 @@ func TestSafePerformAutomationStep_Error(t *testing.T) {
 	want := errors.New("nope")
 	errFn := func(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ json.RawMessage) error { return want }
 
-	err := safePerformAutomationStep(errFn, mdai, events.Command{Type: "variable.set.add"}, eventing.MdaiEvent{})
+	err := safePerformAutomationStep(errFn, mdai, rule.Command{Type: "variable.set.add"}, eventing.MdaiEvent{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "command variable.set.add failed")
 }
@@ -78,28 +78,28 @@ func TestSafePerformAutomationStep_OK(t *testing.T) {
 	mdai := handlers.MdaiInterface{Logger: zap.NewNop()}
 	okFn := func(_ handlers.MdaiInterface, _ eventing.MdaiEvent, _ json.RawMessage) error { return nil }
 
-	err := safePerformAutomationStep(okFn, mdai, events.Command{Type: "variable.set.add"}, eventing.MdaiEvent{})
+	err := safePerformAutomationStep(okFn, mdai, rule.Command{Type: "variable.set.add"}, eventing.MdaiEvent{})
 	require.NoError(t, err)
 }
 
 func TestProcessRuleForAlertingEvent_UnsupportedCommand(t *testing.T) {
 	mdai := handlers.MdaiInterface{Logger: zap.NewNop()}
-	rule := events.Rule{
+	r := rule.Rule{
 		Name:     "unsupported",
 		Trigger:  &triggers.AlertTrigger{Name: "x", Status: "firing"},
-		Commands: []events.Command{{Type: "unknown.cmd"}},
+		Commands: []rule.Command{{Type: "unknown.cmd"}},
 	}
 	err := processRuleForAlertingEvent(context.Background(), eventing.MdaiEvent{
 		Name:    "x.firing",
 		HubName: "t7y",
-	}, mdai, rule, nil /* auditAdapter */)
+	}, mdai, r, nil /* auditAdapter */)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "unsupported command type")
 }
 
 func TestProcessRuleForAlertingEvent_NoCommands(t *testing.T) {
 	mdai := handlers.MdaiInterface{Logger: zap.NewNop()}
-	rule := events.Rule{
+	r := rule.Rule{
 		Name:     "empty",
 		Trigger:  &triggers.AlertTrigger{Name: "x", Status: "firing"},
 		Commands: nil,
@@ -107,7 +107,7 @@ func TestProcessRuleForAlertingEvent_NoCommands(t *testing.T) {
 	err := processRuleForAlertingEvent(context.Background(), eventing.MdaiEvent{
 		Name:    "x.firing",
 		HubName: "t7y",
-	}, mdai, rule, nil)
+	}, mdai, r, nil)
 	require.NoError(t, err)
 }
 

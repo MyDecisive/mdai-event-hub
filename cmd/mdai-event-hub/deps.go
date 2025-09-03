@@ -2,38 +2,26 @@ package main
 
 import (
 	"context"
-	"os"
-	"strconv"
-	"time"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
+	"github.com/decisiveai/mdai-data-core/valkey"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
-	"github.com/decisiveai/mdai-event-hub/internal/valkey"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func initDependencies(ctx context.Context, logger *zap.Logger) (mdai handlers.MdaiInterface, cleanup func()) { //nolint:nonamedreturns
-	valkeyClient, err := valkey.Init(ctx, logger)
+	valkeyClient, err := valkey.Init(ctx, logger, valkey.NewConfig())
 	if err != nil {
-		logger.Fatal("failed to get valkey client", zap.Error(err))
+		logger.Fatal("failed to initialize ValKey client", zap.Error(err))
 	}
 
-	valkeyAuditStreamExpiry := defaultValkeyAuditStreamExpiry
-	valkeyStreamExpiryMsStr := os.Getenv(valkeyAuditStreamExpiryMSEnvVarKey)
-	if valkeyStreamExpiryMsStr != "" {
-		envExpiryMs, parseErr := strconv.Atoi(valkeyStreamExpiryMsStr)
-		if parseErr != nil {
-			logger.Fatal("failed to parse valkeyStreamExpiryMs env var", zap.Error(parseErr))
-		}
-		valkeyAuditStreamExpiry = time.Duration(envExpiryMs) * time.Millisecond
-		logger.Info("Using custom "+mdaiHubEventHistoryStreamName+" expiration threshold MS", zap.Int64("valkeyAuditStreamExpiryMs", valkeyAuditStreamExpiry.Milliseconds()))
-	}
+	auditAdapter := audit.NewAuditAdapter(logger, valkeyClient)
 
-	auditAdapter := audit.NewAuditAdapter(logger, valkeyClient, valkeyAuditStreamExpiry)
+	// TODO add OTEL SDK
 
 	clientset, err := dcorekube.NewK8sClient(logger)
 	if err != nil {
