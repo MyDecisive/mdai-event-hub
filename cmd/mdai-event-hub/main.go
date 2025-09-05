@@ -8,32 +8,19 @@ import (
 
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/subscriber"
+	"github.com/decisiveai/mdai-data-core/service"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-func initLogger() *zap.Logger {
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.TimeKey = "timestamp"
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	encoderConfig.CallerKey = "caller"
-
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderConfig),
-		zapcore.Lock(os.Stdout),
-		zap.DebugLevel,
-	)
-	return zap.New(core, zap.AddCaller())
-}
+const serviceName = "github.com/decisiveai/mdai-event-hub"
 
 func main() {
-	logger := initLogger()
-	//nolint:all
-	defer logger.Sync()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	_, logger, teardown := service.InitLogger(ctx, serviceName)
+	defer teardown()
 
 	mdai, cleanup := initDependencies(ctx, logger)
 	defer cleanup()

@@ -21,8 +21,6 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (mdai handlers.Md
 
 	auditAdapter := audit.NewAuditAdapter(logger, valkeyClient)
 
-	// TODO add OTEL SDK
-
 	clientset, err := dcorekube.NewK8sClient(logger)
 	if err != nil {
 		logger.Fatal("ailed to create k8s client", zap.Error(err))
