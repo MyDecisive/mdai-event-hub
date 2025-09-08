@@ -2,6 +2,7 @@ package eventhub
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -101,6 +102,42 @@ func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestProcessVariableEvent_Success(t *testing.T) {
+	h, ma := newHubWithAdapter(t)
+
+	p := eventing.ManualVariablesActionPayload{
+		VariableRef: "my-set",
+		DataType:    "set",
+		Operation:   "add",
+		Data:        []string{"new-val"},
+	}
+	payload, err := json.Marshal(p)
+	require.NoError(t, err)
+
+	invoker := h.ProcessVariableEvent(context.Background())
+	err = invoker(eventing.MdaiEvent{
+		ID:            "2",
+		Name:          "variable.set.add",
+		HubName:       "t7y",
+		Payload:       string(payload),
+		Timestamp:     time.Now().UTC(),
+		Source:        eventing.ManualVariablesEventSource,
+		CorrelationID: "cid-var-1",
+	})
+	require.NoError(t, err)
+
+	// Verify adapter call
+	calls, ok := ma.calls["AddElementToSet"]
+	require.True(t, ok, "AddElementToSet was not called")
+	require.Len(t, calls, 1)
+
+	got := calls[0]
+	require.Equal(t, "my-set", got["variableKey"])
+	require.Equal(t, "t7y", got["hubName"])
+	require.Equal(t, "new-val", got["value"])
+	require.Equal(t, "cid-var-1", got["correlationID"])
+}
+
 func TestGetRulesMap_BuildsValidRuleAndFallsBackName(t *testing.T) {
 	logger := zap.NewNop()
 
@@ -135,4 +172,18 @@ func TestGetRulesMap_SkipsInvalidEntries(t *testing.T) {
 
 	got := getRulesMap(logger, hubData)
 	require.Empty(t, got)
+}
+
+func TestWithRecover_PanickingHandler(t *testing.T) {
+	logger := zap.NewNop()
+	panickingHandler := func(event eventing.MdaiEvent) error {
+		panic("something went wrong")
+	}
+	event := eventing.MdaiEvent{ID: "test-event-1"}
+
+	wrappedHandler := WithRecover(logger, panickingHandler)
+	err := wrappedHandler(event)
+
+	require.Error(t, err)
+	require.Equal(t, "panic: something went wrong", err.Error())
 }

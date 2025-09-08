@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
 	"github.com/decisiveai/mdai-data-core/kube"
+	auditutils "github.com/decisiveai/mdai-event-hub/internal/audit"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
@@ -65,22 +64,6 @@ const (
 
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
 func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInvoker {
-	// matches event type which should be alert name plus status with rules keys
-	matchedRules := func(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
-		alertName, alertStatus, _ := strings.Cut(eventName, ".")
-
-		eventCtx := triggers.Context{
-			Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
-		}
-
-		matched := make([]rule.Rule, 0, len(rulesMap))
-		for _, r := range rulesMap {
-			if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
-				matched = append(matched, r)
-			}
-		}
-		return matched
-	}
 	return func(event eventing.MdaiEvent) error {
 		logger := h.withEvent(event, "alerting")
 		logger.Info("Processing alerting event for hub")
@@ -155,6 +138,23 @@ func (h *EventHub) withEvent(e eventing.MdaiEvent, component string) *zap.Logger
 	)
 }
 
+// matchedRules matches event type which should be alert name plus status with rules keys.
+func matchedRules(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
+	alertName, alertStatus, _ := strings.Cut(eventName, ".")
+
+	eventCtx := triggers.Context{
+		Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
+	}
+
+	matched := make([]rule.Rule, 0, len(rulesMap))
+	for _, r := range rulesMap {
+		if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
+			matched = append(matched, r)
+		}
+	}
+	return matched
+}
+
 func (h *EventHub) processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, r rule.Rule, namespace string, payloadData map[string]any) error {
 	logger := h.withEvent(event, "alerting").With(zap.String(fldRule, r.Name))
 	logger.Info("Processing rule")
@@ -172,7 +172,7 @@ func (h *EventHub) processRuleForAlertingEvent(ctx context.Context, event eventi
 
 		err := handler(ctx, event, namespace, cmd, payloadData)
 
-		if auditErr := recordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, err == nil); auditErr != nil {
+		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, err == nil); auditErr != nil {
 			clog.Error("audit write failed", zap.Error(auditErr))
 		}
 
@@ -183,29 +183,6 @@ func (h *EventHub) processRuleForAlertingEvent(ctx context.Context, event eventi
 	}
 
 	return nil
-}
-
-func recordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, auditAdapter *audit.AuditAdapter, event eventing.MdaiEvent, r rule.Rule, automationSucceeded bool) error {
-	eventMap := map[string]string{
-		"id":                   event.ID,
-		"name":                 event.Name,
-		"timestamp":            event.Timestamp.UTC().Format(time.RFC3339),
-		"payload":              event.Payload,
-		"source":               event.Source,
-		"sourceId":             event.SourceID,
-		"correlation_id":       event.CorrelationID,
-		"hub_name":             event.HubName,
-		"automation_succeeded": strconv.FormatBool(automationSucceeded),
-		"automation_name":      r.Name,
-	}
-	logger.Info(
-		"AUDIT: MdaiEvent handled",
-		zap.String("mdai-logstream", "audit"),
-		zap.Object("mdaiEvent", &event),
-		zap.Bool("automation_succeeded", automationSucceeded),
-		zap.String("automation_name", r.Name),
-	)
-	return auditAdapter.InsertAuditLogEventFromMap(ctx, eventMap)
 }
 
 func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.Rule {
