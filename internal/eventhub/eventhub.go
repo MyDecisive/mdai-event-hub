@@ -3,7 +3,6 @@ package eventhub
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,75 +11,109 @@ import (
 	"github.com/decisiveai/mdai-data-core/audit"
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
-	"github.com/decisiveai/mdai-data-core/eventing/subscriber"
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
 	"github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	"go.uber.org/zap"
+	"k8s.io/client-go/kubernetes"
 )
 
-type EventHubDeps struct {
+type EventHub struct {
 	Logger              *zap.Logger
-	Subscriber          subscriber.Subscriber
-	ConfigMapController *kube.ConfigMapController
+	HandlerAdapter      handlers.IHandlerAdapter
+	Kube                kubernetes.Interface
 	AuditAdapter        *audit.AuditAdapter
-	Mdai                handlers.MdaiInterface
+	ConfigMapController *kube.ConfigMapController
 }
 
+func (h *EventHub) GetLogger() *zap.Logger {
+	return h.Logger
+}
+
+// GetHandlerAdapter exposes the adapter to VarDeps.
+//
+//nolint:ireturn // VarDeps intentionally abstracts via interface for tests and decoupling
+func (h *EventHub) GetHandlerAdapter() handlers.IHandlerAdapter {
+	return h.HandlerAdapter
+}
+
+func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.HandlerInvoker {
+	return func(event eventing.MdaiEvent) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("handler panic",
+					zap.String("panic", fmt.Sprint(r)),
+					zap.String("eventID", event.ID),
+				)
+				err = fmt.Errorf("panic: %v", r)
+			}
+		}()
+		return next(event)
+	}
+}
+
+const (
+	fldComponent     = "component"
+	fldEventID       = "event_id"
+	fldEventName     = "event_name"
+	fldHubName       = "hub_name"
+	fldSource        = "source"
+	fldCorrelationID = "correlation_id"
+	fldRule          = "rule"
+	fldCommandType   = "command_type"
+)
+
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
-func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) eventing.HandlerInvoker {
-	return func(event eventing.MdaiEvent) error {
-		hubName := event.HubName
-		if hubName == "" {
-			return errors.New("no hub name provided")
+func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInvoker {
+	// matches event type which should be alert name plus status with rules keys
+	matchedRules := func(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
+		alertName, alertStatus, _ := strings.Cut(eventName, ".")
+
+		eventCtx := triggers.Context{
+			Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
 		}
-		mdai.Logger.Info("Processing alerting event for hub",
-			zap.String("hubName", event.HubName),
-			zap.String("eventName", event.Name),
-		)
+
+		matched := make([]rule.Rule, 0, len(rulesMap))
+		for _, r := range rulesMap {
+			if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
+				matched = append(matched, r)
+			}
+		}
+		return matched
+	}
+	return func(event eventing.MdaiEvent) error {
+		logger := h.withEvent(event, "alerting")
+		logger.Info("Processing alerting event for hub")
+
+		if err := event.Validate(); err != nil {
+			return err
+		}
 
 		if event.Source != eventing.PrometheusAlertsEventSource {
-			mdai.Logger.Error("Unsupported Alerts event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
-			return errors.New("unsupported Alerts event source")
+			logger.Warn("Unsupported Alerts event source; skipping")
+			return nil // non-transient; don’t send to DLQ
 		}
 
-		automationConfig, err := mdai.ConfigMapController.GetConfigMapByHubName(event.HubName)
+		automationConfig, err := h.ConfigMapController.GetConfigMapByHubName(event.HubName)
 		if err != nil {
 			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
 		}
 
-		// we need a hub namespace to get secrets and configMaps
-		mdai.Namespace = automationConfig.Namespace
-		hubData := automationConfig.Data
-
-		// matches event type which should be alert name plus status with rules keys
-		matchedRules := func(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
-			alertName, alertStatus, _ := strings.Cut(eventName, ".")
-
-			eventCtx := triggers.Context{
-				Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
-			}
-
-			matched := make([]rule.Rule, 0, len(rulesMap))
-			for _, r := range rulesMap {
-				if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
-					matched = append(matched, r)
-				}
-			}
-			return matched
-		}
-
 		// TODO change informer logic to cache rules so we don't need to process it here every time
-		rules := matchedRules(event.Name, getRulesMap(mdai.Logger, hubData))
+		rules := matchedRules(event.Name, getRulesMap(logger, automationConfig.Data))
 		if len(rules) == 0 {
-			mdai.Logger.Warn("No configured automation for event, skipping", zap.String("eventID", event.ID), zap.String("eventName", event.Name))
+			logger.Warn("No configured automation for event, skipping")
 			return nil
 		}
 
-		// this is temporarily connecting new subjects to old handlers
+		payloadData, err := handlers.ProcessEventPayload(event)
+		if err != nil {
+			return fmt.Errorf("parse payload: %w", err)
+		}
+
 		// one event can trigger several rules
 		for _, r := range rules {
-			if err := processRuleForAlertingEvent(ctx, event, mdai, r, mdai.AuditAdapter); err != nil {
+			if err := h.processRuleForAlertingEvent(ctx, event, r, automationConfig.Namespace, payloadData); err != nil {
 				return err
 			}
 		}
@@ -88,93 +121,67 @@ func ProcessAlertingEvent(ctx context.Context, mdai handlers.MdaiInterface) even
 	}
 }
 
-func processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, mdai handlers.MdaiInterface, r rule.Rule, auditAdapter *audit.AuditAdapter) error {
-	mdai.Logger.Info("Processing automation rule", zap.String("rule", r.Name))
-	for _, cmd := range r.Commands {
-		cmdType := cmd.Type
-		mdai.Logger.Info("Processing automation command", zap.String("commandType", cmdType))
-		var err error
-		switch cmdType {
-		// TODO make a data-core constants
-		case "variable.set.add":
-			err = safePerformAutomationStep(handlers.HandleAddNoisyServiceToSet, mdai, cmd, event)
-		case "variable.set.remove":
-			err = safePerformAutomationStep(handlers.HandleRemoveNoisyServiceFromSet, mdai, cmd, event)
-		case "webhook.call":
-			err = safePerformAutomationStep(handlers.HandleCallSlackWebhookFn, mdai, cmd, event)
-		default:
-			mdai.Logger.Error("Unsupported command type", zap.String("commandType", cmdType))
-			return fmt.Errorf("unsupported command type: %s", cmdType)
-		}
-
-		if auditAdapter != nil {
-			if auditErr := recordAuditEventFromMdaiEvent(ctx, mdai.Logger, auditAdapter, event, r, err == nil); auditErr != nil {
-				mdai.Logger.Error("Failed to write audit event for automation step",
-					zap.String("hubName", event.HubName),
-					zap.String("name", event.Name),
-					zap.String("rule", r.Name),
-					zap.String("eventCorrelationId", event.CorrelationID),
-					zap.Error(auditErr),
-				)
-			}
-		}
-
-		if err != nil {
-			mdai.Logger.Error("Automation step failed",
-				zap.String("hubName", event.HubName),
-				zap.String("name", event.Name),
-				zap.String("rule", r.Name),
-				zap.String("eventCorrelationId", event.CorrelationID),
-				zap.Error(err),
-			)
-			return err
-		}
-	}
-	return nil
-}
-
 // ProcessVariableEvent handles an MdaiEvent according to configured workflows.
-func ProcessVariableEvent(ctx context.Context, mdai handlers.MdaiInterface) eventing.HandlerInvoker {
+func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
-		mdai.Logger.Info("Processing variable event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+		logger := h.withEvent(event, "vars")
+		logger.Info("Processing variable event")
 
 		if event.Source != eventing.ManualVariablesEventSource {
-			mdai.Logger.Error("Unsupported manual variable update event source", zap.String("source", event.Source), zap.String("eventName", event.Name), zap.String("eventID", event.ID))
-			return errors.New("unsupported manual variable update event source")
+			logger.Warn("Unsupported manual variable update event source,skipping")
+			return nil // non-transient
 		}
 
 		// TODO issue a command event here
-		if err := handlers.HandleManualVariablesActions(ctx, mdai, event); err != nil {
-			mdai.Logger.Error("Error processing manual variable update event", zap.String("hubName", event.HubName), zap.String("eventName", event.Name), zap.String("eventID", event.ID), zap.Error(err))
+		if err := handlers.HandleManualVariablesActions(ctx, h, event); err != nil {
+			logger.Error("Error processing manual variable update event", zap.Error(err))
 			return err
 		}
 
-		mdai.Logger.Info("Variable event processed successfully", zap.String("hubName", event.HubName), zap.String("eventName", event.Name))
+		logger.Info("Variable event processed successfully")
 		return nil
 	}
 }
 
-func safePerformAutomationStep(handlerFn handlers.HandlerFunc, mdai handlers.MdaiInterface, command rule.Command, event eventing.MdaiEvent) (err error) {
-	// handle panics
-	defer func() {
-		if r := recover(); r != nil {
-			mdai.Logger.Error(
-				"Panic inside automation handler",
-				zap.Reflect("panicValue", r),
-				zap.String("command", command.Type),
-				zap.String("eventName", event.Name),
-				zap.String("hubName", event.HubName),
-				zap.String("eventCorrelationId", event.CorrelationID),
-			)
-			err = fmt.Errorf("panic executing command %s: %v", command.Type, r)
+// withEvent returns a child logger enriched with stable event fields.
+func (h *EventHub) withEvent(e eventing.MdaiEvent, component string) *zap.Logger {
+	return h.Logger.With(
+		zap.String(fldComponent, component),
+		zap.String(fldEventID, e.ID),
+		zap.String(fldEventName, e.Name),
+		zap.String(fldHubName, e.HubName),
+		zap.String(fldSource, e.Source),
+		zap.String(fldCorrelationID, e.CorrelationID),
+	)
+}
+
+func (h *EventHub) processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, r rule.Rule, namespace string, payloadData map[string]any) error {
+	logger := h.withEvent(event, "alerting").With(zap.String(fldRule, r.Name))
+	logger.Info("Processing rule")
+
+	reg := h.registry()
+	for _, cmd := range r.Commands {
+		clog := logger.With(zap.String(fldCommandType, cmd.Type))
+		clog.Info("Processing command")
+
+		handler, ok := reg[cmd.Type]
+		if !ok {
+			clog.Error("unsupported command type")
+			return fmt.Errorf("unsupported command type: %s", cmd.Type)
 		}
-	}()
 
-	mdai.Logger.Info("<< Executing automation step >>")
+		err := handler(ctx, event, namespace, cmd, payloadData)
 
-	if err := handlerFn(mdai, event, command.Inputs); err != nil {
-		return fmt.Errorf("command %s failed: %w", command.Type, err)
+		if auditErr := recordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, err == nil); auditErr != nil {
+			clog.Error("audit write failed", zap.Error(auditErr))
+		}
+
+		if err != nil {
+			clog.Error("command failed", zap.Error(err))
+			return err
+		}
 	}
+
 	return nil
 }
 
@@ -214,7 +221,7 @@ func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.
 		dec := json.NewDecoder(strings.NewReader(ruleJSON))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&wireRule); err != nil {
-			logger.Warn("could not unmarshall rule", zap.String("key", ruleName), zap.Error(err))
+			logger.Warn("could not unmarshal rule", zap.String("key", ruleName), zap.Error(err))
 			continue
 		}
 
@@ -237,3 +244,5 @@ func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.
 
 	return result
 }
+
+var _ handlers.VarDeps = (*EventHub)(nil)

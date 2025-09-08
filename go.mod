@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3
-	github.com/decisiveai/mdai-data-core v0.2.3-0.20250905165548-acdfd4e9703c
+	github.com/decisiveai/mdai-data-core v0.2.3
 	github.com/decisiveai/mdai-operator v0.2.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.27.0

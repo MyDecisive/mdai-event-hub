@@ -7,13 +7,12 @@ import (
 	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-data-core/valkey"
-	"github.com/decisiveai/mdai-event-hub/internal/handlers"
+	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func initDependencies(ctx context.Context, logger *zap.Logger) (mdai handlers.MdaiInterface, cleanup func()) { //nolint:nonamedreturns
+func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub eventhub.EventHub, cleanup func()) { //nolint:nonamedreturns
 	valkeyClient, err := valkey.Init(ctx, logger, valkey.NewConfig())
 	if err != nil {
 		logger.Fatal("failed to initialize ValKey client", zap.Error(err))
@@ -34,10 +33,9 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (mdai handlers.Md
 		logger.Fatal("failed to run  ConfigMap manager", zap.Error(confMgrRunErr))
 	}
 
-	mdaiInterface := handlers.MdaiInterface{
-		Data:                corehandlers.NewHandlerAdapter(valkeyClient, logger),
+	eventHub = eventhub.EventHub{
+		HandlerAdapter:      corehandlers.NewHandlerAdapter(valkeyClient, logger),
 		Logger:              logger,
-		Namespace:           metav1.NamespaceDefault,
 		Kube:                clientset,
 		AuditAdapter:        auditAdapter,
 		ConfigMapController: configMgr,
@@ -50,5 +48,5 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (mdai handlers.Md
 		logger.Info("Cleanup complete.")
 	}
 
-	return mdaiInterface, cleanup
+	return eventHub, cleanup
 }
