@@ -244,3 +244,66 @@ func TestCmdWebhookCall_URLValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestExecVarSetOp_ErrorCases(t *testing.T) {
+	tcases := []struct {
+		name            string
+		inputsJSON      string
+		wantErrEq       string
+		wantErrContains string
+	}{
+		{
+			name:       "Missing value",
+			inputsJSON: `{"set":"myset"}`,
+			wantErrEq:  "test.op: inputs.value is empty",
+		},
+		{
+			name:       "Missing set",
+			inputsJSON: `{"value":"some-key"}`,
+			wantErrEq:  "test.op: inputs.set is empty",
+		},
+		{
+			name:       "Empty value",
+			inputsJSON: `{"set":"myset","value":""}`,
+			wantErrEq:  "test.op: inputs.value is empty",
+		},
+		{
+			name:            "Decode error",
+			inputsJSON:      `{"set":"myset","value":"mykey"`, // malformed JSON
+			wantErrContains: "test.op: decode:",
+		},
+	}
+
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			setCalled := false
+			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
+				setCalled = true
+				return nil
+			}
+
+			cmd := rule.Command{
+				Type:   "test.op",
+				Inputs: json.RawMessage(tc.inputsJSON),
+			}
+
+			err := execVarSetOp(
+				context.Background(),
+				"test.op",
+				eventing.MdaiEvent{},
+				cmd,
+				map[string]any{},
+				setOp,
+			)
+
+			require.Error(t, err)
+			if tc.wantErrEq != "" {
+				require.Equal(t, tc.wantErrEq, err.Error())
+			}
+			if tc.wantErrContains != "" {
+				require.ErrorContains(t, err, tc.wantErrContains)
+			}
+			require.False(t, setCalled, "setOp should not have been called")
+		})
+	}
+}
