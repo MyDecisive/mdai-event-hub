@@ -154,6 +154,48 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 	require.Equal(t, "cid-rule-1", got["correlationID"])
 }
 
+func TestProcessRuleForAlertingEvent_CommandHandlerFails(t *testing.T) {
+	h, _, client := newHubWithAdapter(t)
+	// Expect an audit log call for the failed command
+	client.EXPECT().Do(mock.MatchedBy(func(arg any) bool {
+		_, ok := arg.(context.Context)
+		return ok
+	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).Times(1)
+
+	r := rule.Rule{
+		Name: "test-rule-fail",
+		Commands: []rule.Command{
+			{
+				Type:   CmdVarSetAdd,
+				Inputs: json.RawMessage(`{"set":"my-set","value":"missing-key"}`),
+			},
+		},
+	}
+
+	event := eventing.MdaiEvent{
+		Name:          "any.firing",
+		HubName:       "hub-y",
+		CorrelationID: "cid-fail-1",
+	}
+	// Payload is missing "missing-key", which will cause the handler to fail.
+	payload := map[string]any{
+		"labels": map[string]any{
+			"some-other-key": "some-value",
+		},
+	}
+
+	err := h.processRuleForAlertingEvent(
+		context.Background(),
+		event,
+		r,
+		"ns-2",
+		payload,
+	)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, `label "missing-key" not found in payload`)
+}
+
 func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {
 	h := &EventHub{Logger: zap.NewNop()}
 
