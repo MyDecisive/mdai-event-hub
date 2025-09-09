@@ -29,7 +29,9 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to create subscriber", zap.Error(err))
 	}
-	defer eventSubscriber.Close() //nolint:all
+	defer func() {
+		_ = eventSubscriber.Close()
+	}()
 
 	// prometheus alerts
 	if err := eventSubscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.WithRecover(logger, eventHub.ProcessAlertingEvent(ctx))); err != nil {

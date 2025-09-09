@@ -9,6 +9,9 @@ require (
 	github.com/decisiveai/mdai-data-core v0.2.3
 	github.com/decisiveai/mdai-operator v0.2.0
 	github.com/stretchr/testify v1.11.1
+	github.com/valkey-io/valkey-go v1.0.62
+	github.com/valkey-io/valkey-go/mock v1.0.62
+	go.uber.org/mock v0.5.2
 	go.uber.org/zap v1.27.0
 	k8s.io/api v0.33.2
 	k8s.io/apimachinery v0.33.2
@@ -55,7 +58,6 @@ require (
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/synadia-io/orbit.go/pcgroups v0.1.0 // indirect
-	github.com/valkey-io/valkey-go v1.0.62 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/bridges/otelzap v0.13.0 // indirect

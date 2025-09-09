@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/decisiveai/mdai-data-core/audit"
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	vkmock "github.com/valkey-io/valkey-go/mock"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
@@ -71,19 +74,22 @@ func (m *mockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubN
 	return nil
 }
 
-func newHubWithAdapter(t *testing.T) (*EventHub, *mockHandlerAdapter) {
+func newHubWithAdapter(t *testing.T) (*EventHub, *mockHandlerAdapter, *vkmock.Client) {
 	t.Helper()
 	ma := newMockAdapter()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockClient := vkmock.NewClient(ctrl)
 	h := &EventHub{
 		Logger:         zap.NewNop(),
 		HandlerAdapter: ma,
-		// Kube nil is fine for the webhook missing-URL test (we fail earlier).
+		AuditAdapter:   audit.NewAuditAdapter(zap.NewNop(), mockClient),
 	}
-	return h, ma
+	return h, ma, mockClient
 }
 
 func TestRegistry_ContainsExpectedCommands(t *testing.T) {
-	h, _ := newHubWithAdapter(t)
+	h, _, _ := newHubWithAdapter(t)
 	reg := h.registry()
 
 	require.Contains(t, reg, CmdVarSetAdd)
@@ -92,7 +98,7 @@ func TestRegistry_ContainsExpectedCommands(t *testing.T) {
 }
 
 func TestCmdVarSetAdd_Success(t *testing.T) {
-	h, ma := newHubWithAdapter(t)
+	h, ma, _ := newHubWithAdapter(t)
 
 	ev := eventing.MdaiEvent{
 		HubName:       "hubA",
@@ -124,7 +130,7 @@ func TestCmdVarSetAdd_Success(t *testing.T) {
 }
 
 func TestCmdVarSetAdd_LabelMissing(t *testing.T) {
-	h, _ := newHubWithAdapter(t)
+	h, _, _ := newHubWithAdapter(t)
 
 	ev := eventing.MdaiEvent{HubName: "hubA", CorrelationID: "cid-1"}
 	payload := map[string]any{
@@ -147,7 +153,7 @@ func TestCmdVarSetAdd_LabelMissing(t *testing.T) {
 }
 
 func TestCmdVarSetAdd_PayloadMissingLabels(t *testing.T) {
-	h, _ := newHubWithAdapter(t)
+	h, _, _ := newHubWithAdapter(t)
 
 	ev := eventing.MdaiEvent{HubName: "hubA", CorrelationID: "cid-1"}
 	// Payload is missing the "labels" key entirely.
@@ -168,7 +174,7 @@ func TestCmdVarSetAdd_PayloadMissingLabels(t *testing.T) {
 }
 
 func TestCmdVarSetRemove_Success(t *testing.T) {
-	h, ma := newHubWithAdapter(t)
+	h, ma, _ := newHubWithAdapter(t)
 
 	ev := eventing.MdaiEvent{
 		HubName:       "hubB",
@@ -199,7 +205,7 @@ func TestCmdVarSetRemove_Success(t *testing.T) {
 }
 
 func TestCmdWebhookCall_URLValidation(t *testing.T) {
-	h, _ := newHubWithAdapter(t) // provides h.registry(); kube is nil but never used in these paths
+	h, _, _ := newHubWithAdapter(t) // provides h.registry(); kube is nil but never used in these paths
 
 	ev := eventing.MdaiEvent{
 		HubName:       "hubC",
