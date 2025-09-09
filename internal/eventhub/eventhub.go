@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+var _ handlers.VarDeps = (*EventHub)(nil)
+
 type EventHub struct {
 	Logger              *zap.Logger
 	HandlerAdapter      handlers.IHandlerAdapter
@@ -221,5 +223,3 @@ func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.
 
 	return result
 }
-
-var _ handlers.VarDeps = (*EventHub)(nil)
