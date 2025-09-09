@@ -10,13 +10,18 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
+	"github.com/decisiveai/mdai-data-core/eventing"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
+
+type VarDeps interface {
+	GetLogger() *zap.Logger
+	GetHandlerAdapter() IHandlerAdapter
+}
 
 func ProcessEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 	if event.Payload == "" {
@@ -47,65 +52,7 @@ func getString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-type setOp func(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error
-
-func doAdd(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error {
-	return mdai.Data.AddElementToSet(ctx, set, hub, value, corr)
-}
-
-func doRemove(ctx context.Context, mdai MdaiInterface, set, hub string, value string, corr string) error {
-	return mdai.Data.RemoveElementFromSet(ctx, set, hub, value, corr)
-}
-
-func HandleAddNoisyServiceToSet(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
-	return handleSetMembership(mdai, event, raw, "variable.set.add", doAdd)
-}
-
-func HandleRemoveNoisyServiceFromSet(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
-	return handleSetMembership(mdai, event, raw, "variable.set.remove", doRemove)
-}
-
-func handleSetMembership(
-	mdai MdaiInterface,
-	event eventing.MdaiEvent,
-	raw json.RawMessage,
-	opName string,
-	op setOp, // TODO review if opName and op should be unified
-) error {
-	var in mdaiv1.SetAction
-	if err := DecodeInputs(raw, &in); err != nil {
-		return fmt.Errorf("%s: decode SetAction: %w", opName, err)
-	}
-
-	payloadData, err := ProcessEventPayload(event)
-	if err != nil {
-		return fmt.Errorf("%s: process payload: %w", opName, err)
-	}
-
-	mdai.Logger.Debug(opName,
-		zap.Object("event", &event),
-		zap.Reflect("payload", payloadData),
-		zap.Reflect("input", in),
-	)
-
-	labels, err := readLabels(payloadData) // map[string]any
-	if err != nil {
-		return fmt.Errorf("%s: %w", opName, err)
-	}
-
-	val, ok := labels[in.Value]
-	if !ok {
-		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Value)
-	}
-
-	ctx := context.Background()
-	if err := op(ctx, mdai, in.Set, event.HubName, val, event.CorrelationID); err != nil {
-		return fmt.Errorf("%s failed: %w", opName, err)
-	}
-	return nil
-}
-
-func readLabels(payloadData map[string]any) (map[string]string, error) {
+func ReadLabels(payloadData map[string]any) (map[string]string, error) {
 	labelsRaw, ok := payloadData["labels"]
 	if !ok {
 		return nil, errors.New("labels not found in payload")
@@ -128,13 +75,13 @@ func readLabels(payloadData map[string]any) (map[string]string, error) {
 	return labels, nil
 }
 
-func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event eventing.MdaiEvent) error {
+func HandleManualVariablesActions(ctx context.Context, mdai VarDeps, event eventing.MdaiEvent) error {
 	var payloadObj eventing.ManualVariablesActionPayload
 	if err := json.Unmarshal([]byte(event.Payload), &payloadObj); err != nil {
 		return err
 	}
 
-	mdai.Logger.Info("Received static variable payload", zap.Reflect("Value", payloadObj.Data))
+	mdai.GetLogger().Info("Received static variable payload", zap.Reflect("value", payloadObj.Data))
 	correlationID := event.CorrelationID
 
 	switch payloadObj.DataType {
@@ -149,7 +96,7 @@ func HandleManualVariablesActions(ctx context.Context, mdai MdaiInterface, event
 	}
 }
 
-func handleSetOperations(ctx context.Context, mdai MdaiInterface, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
+func handleSetOperations(ctx context.Context, mdai VarDeps, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
 	values, ok := payload.Data.([]any)
 	if !ok {
 		return errors.New("data should be a list of strings")
@@ -157,15 +104,15 @@ func handleSetOperations(ctx context.Context, mdai MdaiInterface, payload eventi
 
 	switch payload.Operation {
 	case "add":
-		return processSetValues(ctx, mdai, values, payload.VariableRef, hubName, correlationID, mdai.Data.AddElementToSet, "Setting value")
+		return processSetValues(ctx, mdai, values, payload.VariableRef, hubName, correlationID, mdai.GetHandlerAdapter().AddElementToSet, "Setting value")
 	case "remove":
-		return processSetValues(ctx, mdai, values, payload.VariableRef, hubName, correlationID, mdai.Data.RemoveElementFromSet, "Removing value")
+		return processSetValues(ctx, mdai, values, payload.VariableRef, hubName, correlationID, mdai.GetHandlerAdapter().RemoveElementFromSet, "Removing value")
 	default:
 		return fmt.Errorf("unsupported set operation: %s", payload.Operation)
 	}
 }
 
-func handleMapOperations(ctx context.Context, mdai MdaiInterface, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
+func handleMapOperations(ctx context.Context, mdai VarDeps, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
 	switch payload.Operation {
 	case "add":
 		return handleMapAdd(ctx, mdai, payload, hubName, correlationID)
@@ -176,21 +123,21 @@ func handleMapOperations(ctx context.Context, mdai MdaiInterface, payload eventi
 	}
 }
 
-func handleScalarOperations(ctx context.Context, mdai MdaiInterface, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
+func handleScalarOperations(ctx context.Context, mdai VarDeps, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
 	value, ok := payload.Data.(string)
 	if !ok {
 		return errors.New("data should be a string")
 	}
 
-	mdai.Logger.Info("Setting string", zap.String("value", value))
-	return mdai.Data.SetStringValue(ctx, payload.VariableRef, hubName, value, correlationID)
+	mdai.GetLogger().Info("Setting string", zap.String("value", value))
+	return mdai.GetHandlerAdapter().SetStringValue(ctx, payload.VariableRef, hubName, value, correlationID)
 }
 
 type SetOperation func(ctx context.Context, variableKey, hubName, value, correlationID string) error
 
 func processSetValues(
 	ctx context.Context,
-	mdai MdaiInterface,
+	mdai VarDeps,
 	values []any,
 	variableRef,
 	hubName,
@@ -204,7 +151,7 @@ func processSetValues(
 			return fmt.Errorf("expected string, got %T", val)
 		}
 
-		mdai.Logger.Info(logMessage, zap.String("Value", str))
+		mdai.GetLogger().Info(logMessage, zap.String("value", str))
 		if err := operation(ctx, variableRef, hubName, str, correlationID); err != nil {
 			return err
 		}
@@ -212,7 +159,7 @@ func processSetValues(
 	return nil
 }
 
-func handleMapAdd(ctx context.Context, mdai MdaiInterface, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
+func handleMapAdd(ctx context.Context, mdai VarDeps, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
 	values, ok := payload.Data.(map[string]any)
 	if !ok {
 		return errors.New("data should be a map[string]string")
@@ -224,15 +171,15 @@ func handleMapAdd(ctx context.Context, mdai MdaiInterface, payload eventing.Manu
 			return fmt.Errorf("expected string, got %T", val)
 		}
 
-		mdai.Logger.Info("Setting value", zap.String("Field", key), zap.String("Value", str))
-		if err := mdai.Data.AddSetMapElement(ctx, payload.VariableRef, hubName, key, str, correlationID); err != nil {
+		mdai.GetLogger().Info("Setting value", zap.String("field", key), zap.String("value", str))
+		if err := mdai.GetHandlerAdapter().AddSetMapElement(ctx, payload.VariableRef, hubName, key, str, correlationID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func handleMapRemove(ctx context.Context, mdai MdaiInterface, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
+func handleMapRemove(ctx context.Context, mdai VarDeps, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
 	values, ok := payload.Data.([]any)
 	if !ok {
 		return errors.New("data should be a slice of strings")
@@ -244,8 +191,8 @@ func handleMapRemove(ctx context.Context, mdai MdaiInterface, payload eventing.M
 			return fmt.Errorf("expected string, got %T", key)
 		}
 
-		mdai.Logger.Info("Deleting field", zap.String("Field", k))
-		if err := mdai.Data.RemoveElementFromMap(ctx, payload.VariableRef, hubName, k, correlationID); err != nil {
+		mdai.GetLogger().Info("Deleting field", zap.String("field", k))
+		if err := mdai.GetHandlerAdapter().RemoveElementFromMap(ctx, payload.VariableRef, hubName, k, correlationID); err != nil {
 			return err
 		}
 	}
@@ -257,14 +204,13 @@ type SlackPayload struct {
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, raw json.RawMessage) error {
+func HandleCallSlackWebhookFn(ctx context.Context, kube kubernetes.Interface, namespace string, event eventing.MdaiEvent, raw json.RawMessage, payloadData map[string]any) error {
 	var in mdaiv1.CallWebhookAction
 	if err := DecodeInputs(raw, &in); err != nil {
 		return fmt.Errorf("decode call.webhook: %w", err)
 	}
 
-	ctx := context.Background()
-	webhookURL, err := resolveStringOrFrom(ctx, mdai.Kube, mdai.Namespace, in.URL)
+	webhookURL, err := resolveStringOrFrom(ctx, kube, namespace, in.URL)
 	if err != nil {
 		return fmt.Errorf("resolve webhook url: %w", err)
 	}
@@ -273,11 +219,6 @@ func HandleCallSlackWebhookFn(mdai MdaiInterface, event eventing.MdaiEvent, raw 
 	}
 	if _, err = url.ParseRequestURI(webhookURL); err != nil {
 		return fmt.Errorf("invalid webhook url: %w", err)
-	}
-
-	payloadData, err := ProcessEventPayload(event)
-	if err != nil {
-		return fmt.Errorf("failed to process payload: %w", err)
 	}
 
 	payload, err := buildSlackPayload(in.TemplateValues, event, payloadData)
@@ -367,7 +308,7 @@ func addPayloadFieldByKey(fields []map[string]string, payloadData map[string]any
 }
 
 func addPayloadFieldByKeyFromLabels(fields []map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
-	labels, err := readLabels(payloadData)
+	labels, err := ReadLabels(payloadData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read labels from payload with error: %w", err)
 	}

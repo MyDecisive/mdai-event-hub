@@ -2,13 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-
-	"github.com/decisiveai/mdai-data-core/audit"
-	"github.com/decisiveai/mdai-data-core/kube"
-	"github.com/decisiveai/mdai-event-hub/pkg/eventing"
-	"go.uber.org/zap"
-	"k8s.io/client-go/kubernetes"
 )
 
 type IHandlerAdapter interface {
@@ -18,15 +11,3 @@ type IHandlerAdapter interface {
 	RemoveElementFromMap(ctx context.Context, variableKey string, hubName string, field string, correlationID string) error
 	SetStringValue(ctx context.Context, variableKey string, hubName string, value string, correlationID string) error
 }
-type MdaiInterface struct {
-	Logger              *zap.Logger
-	Data                IHandlerAdapter
-	Namespace           string
-	Kube                kubernetes.Interface
-	AuditAdapter        *audit.AuditAdapter
-	ConfigMapController *kube.ConfigMapController
-}
-
-type HandlerName string
-
-type HandlerFunc func(MdaiInterface, eventing.MdaiEvent, json.RawMessage) error
