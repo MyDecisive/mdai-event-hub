@@ -12,30 +12,16 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
 	"github.com/decisiveai/mdai-data-core/kube"
 	auditutils "github.com/decisiveai/mdai-event-hub/internal/audit"
-	"github.com/decisiveai/mdai-event-hub/internal/handlers"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 )
 
-var _ handlers.VarDeps = (*EventHub)(nil)
-
 type EventHub struct {
 	Logger              *zap.Logger
-	HandlerAdapter      handlers.IHandlerAdapter
+	VarsAdapter         VarDeps
 	Kube                kubernetes.Interface
 	AuditAdapter        *audit.AuditAdapter
 	ConfigMapController *kube.ConfigMapController
-}
-
-func (h *EventHub) GetLogger() *zap.Logger {
-	return h.Logger
-}
-
-// GetHandlerAdapter exposes the adapter to VarDeps.
-//
-//nolint:ireturn // VarDeps intentionally abstracts via interface for tests and decoupling
-func (h *EventHub) GetHandlerAdapter() handlers.IHandlerAdapter {
-	return h.HandlerAdapter
 }
 
 func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.HandlerInvoker {
@@ -64,6 +50,28 @@ const (
 	fldCommandType   = "command_type"
 )
 
+// ProcessVariableEvent handles an MdaiEvent according to configured workflows.
+func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInvoker {
+	return func(event eventing.MdaiEvent) error {
+		logger := h.withEvent(event, "vars")
+		logger.Info("Processing variable event")
+
+		if event.Source != eventing.ManualVariablesEventSource {
+			logger.Warn("Unsupported manual variable update event source,skipping")
+			return nil // non-transient
+		}
+
+		// TODO issue a command event here
+		if err := h.VarsAdapter.HandleManualVariablesActions(ctx, event); err != nil {
+			logger.Error("Error processing manual variable update event", zap.Error(err))
+			return err
+		}
+
+		logger.Info("Variable event processed successfully")
+		return nil
+	}
+}
+
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
 func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
@@ -91,39 +99,24 @@ func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInv
 			return nil
 		}
 
-		payloadData, err := handlers.ProcessEventPayload(event)
+		payloadData, err := processEventPayload(event)
 		if err != nil {
 			return fmt.Errorf("parse payload: %w", err)
 		}
 
 		// one event can trigger several rules
 		for _, r := range rules {
-			if err := h.processRuleForAlertingEvent(ctx, event, r, automationConfig.Namespace, payloadData); err != nil {
+			clog := h.withEvent(event, "alerting").With(zap.String(fldRule, r.Name))
+			clog.Info("Processing rule")
+			err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, "alerting")
+			success := err == nil
+			if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, success); auditErr != nil {
+				clog.Error("audit write failed", zap.Error(auditErr))
+			}
+			if err != nil {
 				return err
 			}
 		}
-		return nil
-	}
-}
-
-// ProcessVariableEvent handles an MdaiEvent according to configured workflows.
-func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInvoker {
-	return func(event eventing.MdaiEvent) error {
-		logger := h.withEvent(event, "vars")
-		logger.Info("Processing variable event")
-
-		if event.Source != eventing.ManualVariablesEventSource {
-			logger.Warn("Unsupported manual variable update event source,skipping")
-			return nil // non-transient
-		}
-
-		// TODO issue a command event here
-		if err := handlers.HandleManualVariablesActions(ctx, h, event); err != nil {
-			logger.Error("Error processing manual variable update event", zap.Error(err))
-			return err
-		}
-
-		logger.Info("Variable event processed successfully")
 		return nil
 	}
 }
@@ -157,34 +150,19 @@ func matchedRules(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
 	return matched
 }
 
-func (h *EventHub) processRuleForAlertingEvent(ctx context.Context, event eventing.MdaiEvent, r rule.Rule, namespace string, payloadData map[string]any) error {
-	logger := h.withEvent(event, "alerting").With(zap.String(fldRule, r.Name))
-	logger.Info("Processing rule")
-
-	reg := h.registry()
-	for _, cmd := range r.Commands {
-		clog := logger.With(zap.String(fldCommandType, cmd.Type))
-		clog.Info("Processing command")
-
-		handler, ok := reg[cmd.Type]
-		if !ok {
-			clog.Error("unsupported command type")
-			return fmt.Errorf("unsupported command type: %s", cmd.Type)
-		}
-
-		err := handler(ctx, event, namespace, cmd, payloadData)
-
-		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, err == nil); auditErr != nil {
-			clog.Error("audit write failed", zap.Error(auditErr))
-		}
-
-		if err != nil {
-			clog.Error("command failed", zap.Error(err))
-			return err
-		}
+func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
+	if event.Payload == "" {
+		return map[string]any{}, nil
 	}
 
-	return nil
+	var payloadData map[string]any
+
+	err := json.Unmarshal([]byte(event.Payload), &payloadData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload %q: %w", event.Payload, err)
+	}
+
+	return payloadData, nil
 }
 
 func getRulesMap(logger *zap.Logger, hubData map[string]string) map[string]rule.Rule {

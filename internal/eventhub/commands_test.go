@@ -3,6 +3,7 @@ package eventhub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/decisiveai/mdai-data-core/audit"
@@ -43,7 +44,7 @@ func (m *mockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey
 	return nil
 }
 
-func (m *mockHandlerAdapter) AddSetMapElement(_ context.Context, variableKey, hubName, field, value, correlationID string) error {
+func (m *mockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string) error {
 	m.calls["AddSetMapElement"] = append(m.calls["AddSetMapElement"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -54,7 +55,7 @@ func (m *mockHandlerAdapter) AddSetMapElement(_ context.Context, variableKey, hu
 	return nil
 }
 
-func (m *mockHandlerAdapter) RemoveElementFromMap(_ context.Context, variableKey, hubName, field, correlationID string) error {
+func (m *mockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string) error {
 	m.calls["RemoveElementFromMap"] = append(m.calls["RemoveElementFromMap"], map[string]string{
 		"variableKey":   variableKey,
 		"hubName":       hubName,
@@ -81,20 +82,14 @@ func newHubWithAdapter(t *testing.T) (*EventHub, *mockHandlerAdapter, *vkmock.Cl
 	defer ctrl.Finish()
 	mockClient := vkmock.NewClient(ctrl)
 	h := &EventHub{
-		Logger:         zap.NewNop(),
-		HandlerAdapter: ma,
-		AuditAdapter:   audit.NewAuditAdapter(zap.NewNop(), mockClient),
+		Logger: zap.NewNop(),
+		VarsAdapter: VarDeps{
+			Logger:         zap.NewNop(),
+			HandlerAdapter: ma,
+		},
+		AuditAdapter: audit.NewAuditAdapter(zap.NewNop(), mockClient),
 	}
 	return h, ma, mockClient
-}
-
-func TestRegistry_ContainsExpectedCommands(t *testing.T) {
-	h, _, _ := newHubWithAdapter(t)
-	reg := h.registry()
-
-	require.Contains(t, reg, CmdVarSetAdd)
-	require.Contains(t, reg, CmdVarSetRemove)
-	require.Contains(t, reg, CmdWebhookCall)
 }
 
 func TestCmdVarSetAdd_Success(t *testing.T) {
@@ -111,14 +106,14 @@ func TestCmdVarSetAdd_Success(t *testing.T) {
 		},
 	}
 	cmd := rule.Command{
-		Type:   CmdVarSetAdd,
+		Type:   rule.CmdVarSetAdd,
 		Inputs: json.RawMessage(`{"set":"myset","value":"key"}`),
 	}
 
-	handler := h.registry()[CmdVarSetAdd]
+	handler := commandDispatch[rule.CmdVarSetAdd]
 	require.NotNil(t, handler)
 
-	err := handler(context.Background(), ev, "ns1", cmd, payload)
+	err := handler(h, context.Background(), ev, "ns1", cmd, payload)
 	require.NoError(t, err)
 
 	assert.Contains(t, ma.calls["AddElementToSet"], map[string]string{
@@ -139,14 +134,14 @@ func TestCmdVarSetAdd_LabelMissing(t *testing.T) {
 		},
 	}
 	cmd := rule.Command{
-		Type:   CmdVarSetAdd,
+		Type:   rule.CmdVarSetAdd,
 		Inputs: json.RawMessage(`{"set":"myset","value":"key"}`),
 	}
 
-	handler := h.registry()[CmdVarSetAdd]
+	handler := commandDispatch[rule.CmdVarSetAdd]
 	require.NotNil(t, handler)
 
-	err := handler(context.Background(), ev, "ns1", cmd, payload)
+	err := handler(h, context.Background(), ev, "ns1", cmd, payload)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "label")
 	require.ErrorContains(t, err, "key")
@@ -161,14 +156,14 @@ func TestCmdVarSetAdd_PayloadMissingLabels(t *testing.T) {
 		"some_other_key": "some_value",
 	}
 	cmd := rule.Command{
-		Type:   CmdVarSetAdd,
+		Type:   rule.CmdVarSetAdd,
 		Inputs: json.RawMessage(`{"set":"myset","value":"key"}`),
 	}
 
-	handler := h.registry()[CmdVarSetAdd]
+	handler := commandDispatch[rule.CmdVarSetAdd]
 	require.NotNil(t, handler)
 
-	err := handler(context.Background(), ev, "ns1", cmd, payload)
+	err := handler(h, context.Background(), ev, "ns1", cmd, payload)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "variable.set.add: labels not found in payload")
 }
@@ -186,14 +181,14 @@ func TestCmdVarSetRemove_Success(t *testing.T) {
 		},
 	}
 	cmd := rule.Command{
-		Type:   CmdVarSetRemove,
+		Type:   rule.CmdVarSetRemove,
 		Inputs: json.RawMessage(`{"set":"blocklist","value":"svc"}`),
 	}
 
-	handler := h.registry()[CmdVarSetRemove]
+	handler := commandDispatch[rule.CmdVarSetRemove]
 	require.NotNil(t, handler)
 
-	err := handler(context.Background(), ev, "ns2", cmd, payload)
+	err := handler(h, context.Background(), ev, "ns2", cmd, payload)
 	require.NoError(t, err)
 
 	assert.Contains(t, ma.calls["RemoveElementFromSet"], map[string]string{
@@ -214,7 +209,7 @@ func TestCmdWebhookCall_URLValidation(t *testing.T) {
 	}
 	payloadData := map[string]any{"labels": map[string]any{}}
 
-	handler := h.registry()[CmdWebhookCall]
+	handler := commandDispatch[rule.CmdWebhookCall]
 	require.NotNil(t, handler)
 
 	tests := []struct {
@@ -241,10 +236,10 @@ func TestCmdWebhookCall_URLValidation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := rule.Command{Type: CmdWebhookCall, Inputs: tc.inputs}
+			cmd := rule.Command{Type: rule.CmdWebhookCall, Inputs: tc.inputs}
 
 			// signature: func(ctx, ev, ns, cmd, payload) error
-			err := handler(context.Background(), ev, "ns3", cmd, payloadData)
+			err := handler(h, context.Background(), ev, "ns3", cmd, payloadData)
 			require.Error(t, err)
 			require.ErrorContains(t, err, tc.wantError)
 		})
@@ -312,4 +307,187 @@ func TestExecVarSetOp_ErrorCases(t *testing.T) {
 			require.False(t, setCalled, "setOp should not have been called")
 		})
 	}
+}
+
+func TestExecVarScalarOp(t *testing.T) {
+	t.Parallel()
+
+	const opName = "test.scalar.op"
+
+	mkCmd := func(inputs string) rule.Command {
+		return rule.Command{Type: opName, Inputs: json.RawMessage(inputs)}
+	}
+
+	// Default payload includes valid labels required by ReadLabels.
+	withDefaultPayload := func(extra map[string]any) map[string]any {
+		p := map[string]any{
+			"labels": map[string]any{
+				"hub":    "hub-A",
+				"source": "unit-test",
+			},
+		}
+		for k, v := range extra {
+			p[k] = v
+		}
+		return p
+	}
+
+	withDefaultLabels := func(extraLabels map[string]any) map[string]any {
+		lbls := map[string]any{
+			"hub":    "hub-A",
+			"source": "unit-test",
+		}
+		for k, v := range extraLabels {
+			lbls[k] = v
+		}
+		return map[string]any{"labels": lbls}
+	}
+
+	tests := []struct {
+		name              string
+		cmd               rule.Command
+		payload           map[string]any
+		setOpReturnErr    error
+		expectErr         bool
+		expectErrEqual    string
+		expectErrContains string
+		expectSetOpCalled bool
+	}{
+		{
+			name:              "DecodeError",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":"mykey"`), // malformed JSON
+			payload:           withDefaultPayload(nil),
+			expectErr:         true,
+			expectErrContains: opName + ": decode:",
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "EmptyScalar",
+			cmd:               mkCmd(`{"scalar":"","value":"some-key"}`),
+			payload:           withDefaultPayload(nil),
+			expectErrEqual:    opName + ": inputs.scalar is empty",
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "EmptyValue",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":""}`),
+			payload:           withDefaultPayload(nil),
+			expectErr:         true,
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "MissingValueInPayload",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":"missing"}`),
+			payload:           withDefaultPayload(nil),
+			expectErr:         true,
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "NonStringPayloadValue",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":"k"}`),
+			payload:           withDefaultPayload(map[string]any{"k": 123}),
+			expectErr:         true,
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "LabelsMissing",
+			cmd:               mkCmd(`{"scalar":"s","value":"k"}`),
+			payload:           map[string]any{"k": "v"}, // no "labels"
+			expectErr:         true,                     // should be "labels not found in payload"
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "LabelsWrongType",
+			cmd:               mkCmd(`{"scalar":"s","value":"k"}`),
+			payload:           map[string]any{"labels": "oops", "k": "v"},
+			expectErr:         true, // payload.labels wrong type
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "LabelsNonStringValue",
+			cmd:               mkCmd(`{"scalar":"s","value":"k"}`),
+			payload:           map[string]any{"labels": map[string]any{"hub": 123}, "k": "v"},
+			expectErr:         true, // label value not string
+			expectSetOpCalled: false,
+		},
+		{
+			name:              "SetOpError",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":"k"}`),
+			payload:           withDefaultLabels(map[string]any{"k": "v"}),
+			setOpReturnErr:    errors.New("kaboom"),
+			expectErr:         true,
+			expectSetOpCalled: true,
+		},
+		{
+			name:              "Success",
+			cmd:               mkCmd(`{"scalar":"myscalar","value":"k"}`),
+			payload:           withDefaultLabels(map[string]any{"k": "v"}),
+			expectErr:         false,
+			expectSetOpCalled: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			setOpCalled := false
+			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
+				setOpCalled = true
+				return tc.setOpReturnErr
+			}
+
+			err := execVarScalarOp(
+				context.Background(),
+				opName,
+				eventing.MdaiEvent{}, // correlationID can be empty for these tests
+				tc.cmd,
+				tc.payload,
+				setOp,
+			)
+
+			switch {
+			case tc.expectErrEqual != "":
+				require.Error(t, err)
+				require.Equal(t, tc.expectErrEqual, err.Error())
+			case tc.expectErrContains != "":
+				require.Error(t, err)
+				require.ErrorContains(t, err, tc.expectErrContains)
+			case tc.expectErr:
+				require.Error(t, err)
+			default:
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, tc.expectSetOpCalled, setOpCalled, "setOp call expectation mismatch")
+		})
+	}
+}
+
+func TestReadLabels(t *testing.T) {
+	t.Run("Success", func(t *testing.T) {
+		lbls, err := ReadLabels(map[string]any{
+			"labels": map[string]any{"hub": "h1", "source": "unit"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, map[string]string{"hub": "h1", "source": "unit"}, lbls)
+	})
+
+	t.Run("Missing", func(t *testing.T) {
+		_, err := ReadLabels(map[string]any{})
+		require.Error(t, err)
+		require.Equal(t, "labels not found in payload", err.Error())
+	})
+
+	t.Run("WrongType", func(t *testing.T) {
+		_, err := ReadLabels(map[string]any{"labels": "oops"})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "payload.labels has type")
+	})
+
+	t.Run("NonStringValue", func(t *testing.T) {
+		_, err := ReadLabels(map[string]any{"labels": map[string]any{"hub": 123}})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "label value for key hub is not a string")
+	})
 }

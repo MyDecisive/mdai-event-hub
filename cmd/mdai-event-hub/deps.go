@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub eventhub.EventHub, cleanup func()) { //nolint:nonamedreturns
+func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventhub.EventHub, cleanup func()) { //nolint:nonamedreturns
 	valkeyClient, err := valkey.Init(ctx, logger, valkey.NewConfig())
 	if err != nil {
 		logger.Fatal("failed to initialize ValKey client", zap.Error(err))
@@ -22,7 +22,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub eventhu
 
 	clientset, err := dcorekube.NewK8sClient(logger)
 	if err != nil {
-		logger.Fatal("ailed to create k8s client", zap.Error(err))
+		logger.Fatal("failed to create k8s client", zap.Error(err))
 	}
 
 	configMgr, err := dcorekube.NewConfigMapController(dcorekube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
@@ -33,8 +33,11 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub eventhu
 		logger.Fatal("failed to run  ConfigMap manager", zap.Error(confMgrRunErr))
 	}
 
-	eventHub = eventhub.EventHub{
-		HandlerAdapter:      corehandlers.NewHandlerAdapter(valkeyClient, logger),
+	eventHub = &eventhub.EventHub{
+		VarsAdapter: eventhub.VarDeps{
+			Logger:         logger,
+			HandlerAdapter: corehandlers.NewHandlerAdapter(valkeyClient, logger),
+		},
 		Logger:              logger,
 		Kube:                clientset,
 		AuditAdapter:        auditAdapter,
