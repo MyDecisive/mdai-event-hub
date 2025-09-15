@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3
-	github.com/decisiveai/mdai-data-core v0.2.3
+	github.com/decisiveai/mdai-data-core v0.2.4-0.20250912141653-3b100e180808
 	github.com/decisiveai/mdai-operator v0.2.0
 	github.com/stretchr/testify v1.11.1
 	github.com/valkey-io/valkey-go v1.0.62

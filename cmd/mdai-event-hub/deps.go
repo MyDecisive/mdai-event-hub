@@ -5,6 +5,7 @@ import (
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
+	"github.com/decisiveai/mdai-data-core/interpolation"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-data-core/valkey"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
@@ -42,6 +43,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		Kube:                clientset,
 		AuditAdapter:        auditAdapter,
 		ConfigMapController: configMgr,
+		InterpolationEngine: interpolation.NewEngine(logger),
 	}
 
 	cleanup = func() {

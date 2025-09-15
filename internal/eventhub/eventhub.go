@@ -10,6 +10,7 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
+	"github.com/decisiveai/mdai-data-core/interpolation"
 	"github.com/decisiveai/mdai-data-core/kube"
 	auditutils "github.com/decisiveai/mdai-event-hub/internal/audit"
 	"go.uber.org/zap"
@@ -22,6 +23,7 @@ type EventHub struct {
 	Kube                kubernetes.Interface
 	AuditAdapter        *audit.AuditAdapter
 	ConfigMapController *kube.ConfigMapController
+	InterpolationEngine *interpolation.Engine
 }
 
 func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.HandlerInvoker {

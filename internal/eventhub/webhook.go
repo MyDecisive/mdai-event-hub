@@ -169,7 +169,7 @@ func getString(m map[string]any, key string) (string, error) {
 }
 
 func addPayloadFieldByKeyFromLabels(fields []map[string]string, payloadData map[string]any, key string) ([]map[string]string, error) {
-	labels, err := ReadLabels(payloadData)
+	labels, err := readLabels(payloadData) // TODO see if we should use interpolation here
 	if err != nil {
 		return nil, fmt.Errorf("failed to read labels from payload with error: %w", err)
 	}
@@ -183,6 +183,29 @@ func addPayloadFieldByKeyFromLabels(fields []map[string]string, payloadData map[
 		"type": "mrkdwn",
 		"text": fmt.Sprintf("*%s* - %s", key, payloadValue),
 	}), nil
+}
+
+func readLabels(payloadData map[string]any) (map[string]string, error) {
+	labelsRaw, ok := payloadData["labels"]
+	if !ok {
+		return nil, errors.New("labels not found in payload")
+	}
+
+	labelsMap, ok := labelsRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("payload.labels has type %T, want map[string]any", labelsRaw)
+	}
+
+	labels := make(map[string]string)
+	for k, v := range labelsMap {
+		strValue, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("label value for key %s is not a string", k)
+		}
+		labels[k] = strValue
+	}
+
+	return labels, nil
 }
 
 func resolveStringOrFrom(ctx context.Context, kube kubernetes.Interface, namespace string, stringOrFrom mdaiv1.StringOrFrom) (string, error) {

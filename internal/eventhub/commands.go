@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -51,14 +50,22 @@ func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.M
 	return nil
 }
 
+// interpolate evaluates a template string against the current event/payload using the configured engine.
+func (h *EventHub) interpolate(tmpl, opName, what string, event eventing.MdaiEvent) (string, error) {
+	if h.InterpolationEngine == nil {
+		return "", fmt.Errorf("%s: interpolate %s: interpolation engine is not configured", opName, what)
+	}
+	v := h.InterpolationEngine.Interpolate(tmpl, &event)
+	return v, nil
+}
+
 type setOp func(ctx context.Context, variableKey, hubName, value, correlationID string) error
 
-func execVarSetOp(
+func (h *EventHub) execVarSetOp(
 	ctx context.Context,
 	opName string,
 	ev eventing.MdaiEvent,
 	cmd rule.Command,
-	payload map[string]any,
 	op setOp,
 ) error {
 	var in mdaiv1.SetAction
@@ -72,13 +79,9 @@ func execVarSetOp(
 		return fmt.Errorf("%s: inputs.set is empty", opName)
 	}
 
-	labels, err := ReadLabels(payload)
+	val, err := h.interpolate(in.Value, opName, "value", ev)
 	if err != nil {
-		return fmt.Errorf("%s: %w", opName, err)
-	}
-	val, ok := labels[in.Value] // TODO change to extrapolation logic
-	if !ok {
-		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Value)
+		return err
 	}
 
 	return op(ctx, in.Set, ev.HubName, val, ev.CorrelationID)
@@ -87,17 +90,17 @@ func execVarSetOp(
 func (h *EventHub) cmdVarSetAdd(
 	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
 ) error {
-	return execVarSetOp(ctx, string(rule.CmdVarSetAdd), ev, cmd, payload, h.VarsAdapter.HandlerAdapter.AddElementToSet)
+	return h.execVarSetOp(ctx, string(rule.CmdVarSetAdd), ev, cmd, h.VarsAdapter.HandlerAdapter.AddElementToSet)
 }
 
 func (h *EventHub) cmdVarSetRemove(
 	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
 ) error {
-	return execVarSetOp(ctx, string(rule.CmdVarSetRemove), ev, cmd, payload, h.VarsAdapter.HandlerAdapter.RemoveElementFromSet)
+	return h.execVarSetOp(ctx, string(rule.CmdVarSetRemove), ev, cmd, h.VarsAdapter.HandlerAdapter.RemoveElementFromSet)
 }
 
 func (h *EventHub) cmdVarMapAdd(
-	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
 ) error {
 	opName := rule.CmdVarMapAdd.String()
 	var in mdaiv1.MapAction
@@ -111,26 +114,20 @@ func (h *EventHub) cmdVarMapAdd(
 		return fmt.Errorf("%s: inputs.map is empty", opName)
 	}
 
-	labels, err := ReadLabels(payload)
+	key, err := h.interpolate(in.Key, opName, "key", event)
 	if err != nil {
-		return fmt.Errorf("%s: %w", opName, err)
+		return err
+	}
+	val, err := h.interpolate(*in.Value, opName, "value", event)
+	if err != nil {
+		return err
 	}
 
-	field, ok := labels[in.Key] // TODO change to extrapolation logic
-	if !ok {
-		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Key)
-	}
-
-	val := in.Value // TODO change to extrapolation logic
-	if val == nil {
-		return fmt.Errorf("%s: inputs.value is nil", opName)
-	}
-
-	return h.VarsAdapter.HandlerAdapter.SetMapEntry(ctx, in.Map, ev.HubName, field, *val, ev.CorrelationID)
+	return h.VarsAdapter.HandlerAdapter.SetMapEntry(ctx, in.Map, event.HubName, key, val, event.CorrelationID)
 }
 
 func (h *EventHub) cmdVarMapRemove(
-	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
 ) error {
 	opName := rule.CmdVarMapRemove.String()
 	var in mdaiv1.MapAction
@@ -144,17 +141,12 @@ func (h *EventHub) cmdVarMapRemove(
 		return fmt.Errorf("%s: inputs.map is empty", opName)
 	}
 
-	labels, err := ReadLabels(payload)
+	key, err := h.interpolate(in.Key, opName, "key", event)
 	if err != nil {
-		return fmt.Errorf("%s: %w", opName, err)
+		return err
 	}
 
-	field, ok := labels[in.Key] // TODO change to extrapolation logic
-	if !ok {
-		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Key)
-	}
-
-	return h.VarsAdapter.HandlerAdapter.RemoveMapEntry(ctx, in.Map, ev.HubName, field, ev.CorrelationID)
+	return h.VarsAdapter.HandlerAdapter.RemoveMapEntry(ctx, in.Map, event.HubName, key, event.CorrelationID)
 }
 
 func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
@@ -162,15 +154,14 @@ func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns
 }
 
 func (h *EventHub) cmdVarScalarUpdate(ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any) error {
-	return execVarScalarOp(ctx, string(rule.CmdVarScalarUpdate), ev, cmd, payload, h.VarsAdapter.HandlerAdapter.SetStringValue)
+	return h.execVarScalarOp(ctx, string(rule.CmdVarScalarUpdate), ev, cmd, h.VarsAdapter.HandlerAdapter.SetStringValue)
 }
 
-func execVarScalarOp(
+func (h *EventHub) execVarScalarOp(
 	ctx context.Context,
 	opName string,
-	ev eventing.MdaiEvent,
+	event eventing.MdaiEvent,
 	cmd rule.Command,
-	payload map[string]any,
 	op setOp,
 ) error {
 	var in mdaiv1.ScalarAction
@@ -184,39 +175,12 @@ func execVarScalarOp(
 		return fmt.Errorf("%s: inputs.scalar is empty", opName)
 	}
 
-	labels, err := ReadLabels(payload)
+	val, err := h.interpolate(in.Value, opName, "value", event)
 	if err != nil {
-		return fmt.Errorf("%s: %w", opName, err)
-	}
-	val, ok := labels[in.Value] // TODO change to extrapolation logic
-	if !ok {
-		return fmt.Errorf("%s: label %q not found in payload labels", opName, in.Value)
+		return err
 	}
 
-	return op(ctx, in.Scalar, ev.HubName, val, ev.CorrelationID)
-}
-
-func ReadLabels(payloadData map[string]any) (map[string]string, error) {
-	labelsRaw, ok := payloadData["labels"]
-	if !ok {
-		return nil, errors.New("labels not found in payload")
-	}
-
-	labelsMap, ok := labelsRaw.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("payload.labels has type %T, want map[string]any", labelsRaw)
-	}
-
-	labels := make(map[string]string)
-	for k, v := range labelsMap {
-		strValue, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("label value for key %s is not a string", k)
-		}
-		labels[k] = strValue
-	}
-
-	return labels, nil
+	return op(ctx, in.Scalar, event.HubName, val, event.CorrelationID)
 }
 
 func DecodeInputs[T any](raw json.RawMessage, out *T) error {
