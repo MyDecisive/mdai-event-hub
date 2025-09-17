@@ -523,3 +523,88 @@ func TestCmdVarMapRemove_Success(t *testing.T) {
 		"correlationID": "cid-map-remove-1",
 	}, ma.calls["RemoveElementFromMap"][0])
 }
+
+func TestCmdVarMapAdd_MissingValue(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-map-test",
+		CorrelationID: "cid-map-err-1",
+	}
+
+	cmd := rule.Command{
+		Type: rule.CmdVarMapAdd,
+		Inputs: json.RawMessage(`{
+			"map": "active_alerts",
+			"key": "some-key"
+		}`), // value is missing
+	}
+
+	handler := commandDispatch[rule.CmdVarMapAdd]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	require.Error(t, err)
+	assert.Equal(t, "variable.map.add: inputs.value is empty", err.Error())
+	assert.Empty(t, ma.calls, "adapter should not have been called")
+}
+
+func TestCmdVarMapAdd_MissingMap(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-map-test",
+		CorrelationID: "cid-map-err-2",
+	}
+
+	cmd := rule.Command{
+		Type: rule.CmdVarMapAdd,
+		Inputs: json.RawMessage(`{
+			"key": "some-key",
+			"value": "some-value"
+		}`), // map is missing
+	}
+
+	handler := commandDispatch[rule.CmdVarMapAdd]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	require.Error(t, err)
+	assert.Equal(t, "variable.map.add: inputs.map is empty", err.Error())
+	assert.Empty(t, ma.calls, "adapter should not have been called")
+}
+
+func TestCmdVarMapAdd_MalformedJSON(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-map-test",
+		CorrelationID: "cid-map-err-3",
+	}
+
+	cmd := rule.Command{
+		Type:   rule.CmdVarMapAdd,
+		Inputs: json.RawMessage(`{"map":"active_alerts","key":"some-key"`), // Malformed JSON
+	}
+
+	handler := commandDispatch[rule.CmdVarMapAdd]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "variable.map.add: decode:")
+	require.Empty(t, ma.calls, "adapter should not have been called")
+}
+
+func TestInterpolate_EngineNotConfigured(t *testing.T) {
+	h := &EventHub{
+		Logger: zap.NewNop(),
+		// InterpolationEngine is intentionally nil
+	}
+
+	result, err := h.interpolate("template", "test.op", "field", eventing.MdaiEvent{})
+
+	require.Error(t, err)
+	assert.Equal(t, "test.op: interpolate field: interpolation engine is not configured", err.Error())
+	assert.Empty(t, result)
+}
