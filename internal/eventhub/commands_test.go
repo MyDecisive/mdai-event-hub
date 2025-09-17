@@ -444,3 +444,81 @@ func TestExecVarScalarOp(t *testing.T) {
 		})
 	}
 }
+
+func TestCmdVarMapAdd_Success(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	payload := map[string]any{
+		"alert": map[string]any{
+			"name": "HighCPU",
+		},
+		"instance": "server-123",
+	}
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-map-test",
+		CorrelationID: "cid-map-1",
+		Payload:       mustJSON(t, payload),
+	}
+
+	cmd := rule.Command{
+		Type: rule.CmdVarMapAdd,
+		Inputs: json.RawMessage(`{
+			"map": "active_alerts",
+			"key": "${trigger:payload.instance}",
+			"value": "${trigger:payload.alert.name}"
+		}`),
+	}
+
+	handler := commandDispatch[rule.CmdVarMapAdd]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	require.NoError(t, err)
+
+	require.Contains(t, ma.calls, "AddSetMapElement")
+	require.Len(t, ma.calls["AddSetMapElement"], 1)
+
+	assert.Equal(t, map[string]string{
+		"variableKey":   "active_alerts",
+		"hubName":       "hub-map-test",
+		"field":         "server-123",
+		"value":         "HighCPU",
+		"correlationID": "cid-map-1",
+	}, ma.calls["AddSetMapElement"][0])
+}
+func TestCmdVarMapRemove_Success(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	payload := map[string]any{
+		"instance": "server-456",
+	}
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-map-remove-test",
+		CorrelationID: "cid-map-remove-1",
+		Payload:       mustJSON(t, payload),
+	}
+
+	cmd := rule.Command{
+		Type: rule.CmdVarMapRemove,
+		Inputs: json.RawMessage(`{
+			"map": "stale_alerts",
+			"key": "${trigger:payload.instance}"
+		}`),
+	}
+
+	handler := commandDispatch[rule.CmdVarMapRemove]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns-map-remove", cmd, nil)
+	require.NoError(t, err)
+
+	require.Contains(t, ma.calls, "RemoveElementFromMap")
+	require.Len(t, ma.calls["RemoveElementFromMap"], 1)
+
+	assert.Equal(t, map[string]string{
+		"variableKey":   "stale_alerts",
+		"hubName":       "hub-map-remove-test",
+		"field":         "server-456",
+		"correlationID": "cid-map-remove-1",
+	}, ma.calls["RemoveElementFromMap"][0])
+}

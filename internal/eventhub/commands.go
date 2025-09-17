@@ -136,9 +136,6 @@ func (h *EventHub) cmdVarMapRemove(
 	if err := DecodeInputs(cmd.Inputs, &in); err != nil {
 		return fmt.Errorf("%s: decode: %w", opName, err)
 	}
-	if in.Value == nil || *in.Value == "" {
-		return fmt.Errorf("%s: inputs.value is empty", opName)
-	}
 	if in.Map == "" {
 		return fmt.Errorf("%s: inputs.map is empty", opName)
 	}
