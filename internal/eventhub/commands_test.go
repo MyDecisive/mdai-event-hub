@@ -608,3 +608,141 @@ func TestInterpolate_EngineNotConfigured(t *testing.T) {
 	assert.Equal(t, "test.op: interpolate field: interpolation engine is not configured", err.Error())
 	assert.Empty(t, result)
 }
+
+func TestProcessCommandsForEvent_Success_Multiple(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-multi",
+		CorrelationID: "cid-multi-1",
+		Payload:       mustJSON(t, map[string]any{"labels": map[string]any{"a": "foo"}}),
+	}
+
+	cmds := []rule.Command{
+		{Type: rule.CmdVarSetAdd, Inputs: json.RawMessage(`{"set":"s1","value":"${trigger:payload.labels.a}"}`)},
+		{Type: rule.CmdVarSetRemove, Inputs: json.RawMessage(`{"set":"s2","value":"${trigger:payload.labels.a}"}`)},
+	}
+
+	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
+	require.NoError(t, err)
+
+	require.Len(t, ma.calls["AddElementToSet"], 1)
+	require.Equal(t, "s1", ma.calls["AddElementToSet"][0]["variableKey"])
+	require.Equal(t, "foo", ma.calls["AddElementToSet"][0]["value"])
+
+	require.Len(t, ma.calls["RemoveElementFromSet"], 1)
+	require.Equal(t, "s2", ma.calls["RemoveElementFromSet"][0]["variableKey"])
+	require.Equal(t, "foo", ma.calls["RemoveElementFromSet"][0]["value"])
+}
+
+func TestProcessCommandsForEvent_UnsupportedType(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{HubName: "h"}
+	cmds := []rule.Command{{Type: rule.CommandType("does.not.exist")}}
+
+	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
+	require.Error(t, err)
+	require.ErrorContains(t, err, `unsupported command type`)
+}
+
+func TestProcessCommandsForEvent_HandlerError_BubblesUp(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+
+	// This command is invalid: "set" missing ⇒ execVarSetOp error.
+	ev := eventing.MdaiEvent{HubName: "h", Payload: mustJSON(t, map[string]any{"labels": map[string]any{"k": "v"}})}
+	cmds := []rule.Command{{Type: rule.CmdVarSetAdd, Inputs: json.RawMessage(`{"value":"${trigger:payload.labels.k}"}`)}}
+
+	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
+	require.Error(t, err)
+	// Ensure the wrapper from processCommandsForEvent is present.
+	require.ErrorContains(t, err, "command 0 (variable.set.add) failed")
+}
+
+func TestCmdVarScalarUpdate_Success_Dispatch(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	ev := eventing.MdaiEvent{
+		HubName:       "hub-scalar",
+		CorrelationID: "cid-scalar-1",
+		Payload:       `{"k":"v"}`,
+	}
+	cmd := rule.Command{
+		Type:   rule.CmdVarScalarUpdate,
+		Inputs: json.RawMessage(`{"scalar":"my-scalar","value":"${trigger:payload.k}"}`),
+	}
+
+	handler := commandDispatch[rule.CmdVarScalarUpdate]
+	require.NotNil(t, handler)
+
+	err := handler(h, context.Background(), ev, "ns", cmd, nil)
+	require.NoError(t, err)
+
+	require.Len(t, ma.calls["SetStringValue"], 1)
+	entry := ma.calls["SetStringValue"][0]
+	require.Equal(t, "my-scalar", entry["variableKey"])
+	require.Equal(t, "hub-scalar", entry["hubName"])
+	require.Equal(t, "v", entry["value"])
+	require.Equal(t, "cid-scalar-1", entry["correlationID"])
+}
+
+func TestCmdVarMapRemove_ErrorCases(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	// Malformed JSON
+	{
+		ev := eventing.MdaiEvent{HubName: "h"}
+		cmd := rule.Command{Type: rule.CmdVarMapRemove, Inputs: json.RawMessage(`{"map":"m","key":"k"`)}
+
+		handler := commandDispatch[rule.CmdVarMapRemove]
+		require.NotNil(t, handler)
+
+		err := handler(h, context.Background(), ev, "ns", cmd, nil)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "variable.map.remove: decode:")
+		require.Empty(t, ma.calls["RemoveElementFromMap"])
+	}
+
+	// Missing map
+	{
+		ev := eventing.MdaiEvent{HubName: "h", Payload: `{"k":"v"}`}
+		cmd := rule.Command{Type: rule.CmdVarMapRemove, Inputs: json.RawMessage(`{"key":"${trigger:payload.k}"}`)}
+
+		handler := commandDispatch[rule.CmdVarMapRemove]
+		require.NotNil(t, handler)
+
+		err := handler(h, context.Background(), ev, "ns", cmd, nil)
+		require.Error(t, err)
+		require.Equal(t, "variable.map.remove: inputs.map is empty", err.Error())
+	}
+}
+
+func TestDecodeInputs_UnknownField_Fails(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+
+	cmd := rule.Command{
+		Type:   rule.CmdVarScalarUpdate,
+		Inputs: json.RawMessage(`{"scalar":"s","value":"x","unknown":1}`),
+	}
+
+	err := h.execVarScalarOp(context.Background(), "variable.scalar.update", eventing.MdaiEvent{}, cmd,
+		func(context.Context, string, string, string, string) error { return nil })
+	require.Error(t, err)
+	require.ErrorContains(t, err, "decode:")
+	require.ErrorContains(t, err, `unknown field`)
+}
+
+func TestCmdVarMapAdd_EmptyStringValuePointer(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	// "value" present but empty string → pointer non-nil, deref == "" → error path.
+	cmd := rule.Command{
+		Type:   rule.CmdVarMapAdd,
+		Inputs: json.RawMessage(`{"map":"m","key":"k","value":""}`),
+	}
+
+	err := commandDispatch[rule.CmdVarMapAdd](h, context.Background(), eventing.MdaiEvent{}, "ns", cmd, nil)
+	require.Error(t, err)
+	require.Equal(t, "variable.map.add: inputs.value is empty", err.Error())
+	require.Empty(t, ma.calls["AddSetMapElement"])
+}
