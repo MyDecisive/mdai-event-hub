@@ -3,7 +3,7 @@ package eventhub
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -401,7 +401,7 @@ func TestGetRulesMap_SkipsUnknownTopLevelFields(t *testing.T) {
 func TestWithRecover_PropagatesError_NoPanic(t *testing.T) {
 	t.Parallel()
 
-	sentinel := fmt.Errorf("boom")
+	sentinel := errors.New("boom")
 	handler := func(event eventing.MdaiEvent) error { return sentinel }
 
 	wrapped := WithRecover(zap.NewNop(), handler)
