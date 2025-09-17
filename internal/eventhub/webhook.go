@@ -210,7 +210,7 @@ func readLabels(payloadData map[string]any) (map[string]string, error) {
 
 func resolveStringOrFrom(ctx context.Context, kube kubernetes.Interface, namespace string, stringOrFrom mdaiv1.StringOrFrom) (string, error) {
 	if stringOrFrom.Value != nil {
-		return strings.TrimSpace(*stringOrFrom.Value), nil
+		return *stringOrFrom.Value, nil
 	}
 	if stringOrFrom.ValueFrom == nil {
 		return "", errors.New("neither value nor valueFrom set")
