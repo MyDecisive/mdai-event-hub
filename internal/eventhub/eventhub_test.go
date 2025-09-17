@@ -3,6 +3,7 @@ package eventhub
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -334,4 +335,88 @@ func TestProcessEventPayload_InvalidJSON(t *testing.T) {
 	assert.Nil(t, result, "expected result to be nil on invalid JSON")
 	require.Error(t, err, "expected an error for invalid JSON payload")
 	assert.Contains(t, err.Error(), "failed to unmarshal payload")
+}
+
+func TestProcessEventPayload_EmptyPayload(t *testing.T) {
+	t.Parallel()
+
+	ev := eventing.MdaiEvent{HubName: "hub", Name: "x.firing", Payload: ""}
+	got, err := processEventPayload(ev)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+func TestMatchedRules_NoDotInEventName(t *testing.T) {
+	t.Parallel()
+
+	// When eventName has no ".", status is empty and name == whole string.
+	rules := map[string]rule.Rule{
+		"need-any-status": {
+			Name: "any-status",
+			Trigger: &triggers.AlertTrigger{
+				Name:   "cpu_spike",
+				Status: "", // match any status
+			},
+		},
+		"need-firing": {
+			Name: "need-firing",
+			Trigger: &triggers.AlertTrigger{
+				Name:   "cpu_spike",
+				Status: "firing", // should NOT match (event has empty status)
+			},
+		},
+	}
+
+	result := matchedRules("cpu_spike", rules)
+	require.Len(t, result, 1)
+	require.Equal(t, "any-status", result[0].Name)
+}
+
+func TestGetRulesMap_SkipsUnknownTopLevelFields(t *testing.T) {
+	t.Parallel()
+
+	hubData := map[string]string{
+		"r1": `{
+			"name":"ok",
+			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
+			"commands":[]
+		}`,
+		"r2": `{
+			"name":"has-extra",
+			"extra": 123,
+			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
+			"commands":[]
+		}`,
+	}
+	got := getRulesMap(zap.NewNop(), hubData)
+	// r2 is skipped, r1 is kept.
+	require.Len(t, got, 1)
+	_, ok := got["r1"]
+	require.True(t, ok)
+	_, hasR2 := got["r2"]
+	require.False(t, hasR2)
+}
+
+func TestWithRecover_PropagatesError_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	sentinel := fmt.Errorf("boom")
+	handler := func(event eventing.MdaiEvent) error { return sentinel }
+
+	wrapped := WithRecover(zap.NewNop(), handler)
+	err := wrapped(eventing.MdaiEvent{ID: "e"})
+	require.Error(t, err)
+	require.Equal(t, sentinel, err)
+}
+
+func TestWithRecover_PanicNonStringValue(t *testing.T) {
+	t.Parallel()
+
+	handler := func(event eventing.MdaiEvent) error { panic(42) }
+	wrapped := WithRecover(zap.NewNop(), handler)
+
+	err := wrapped(eventing.MdaiEvent{ID: "e2"})
+	require.Error(t, err)
+	require.Equal(t, "panic: 42", err.Error())
 }
