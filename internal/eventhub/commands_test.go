@@ -486,6 +486,7 @@ func TestCmdVarMapAdd_Success(t *testing.T) {
 		"correlationID": "cid-map-1",
 	}, ma.calls["AddSetMapElement"][0])
 }
+
 func TestCmdVarMapRemove_Success(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
 
