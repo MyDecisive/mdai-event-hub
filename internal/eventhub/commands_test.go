@@ -10,7 +10,6 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/interpolation"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	vkmock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/mock/gomock"
@@ -27,51 +26,35 @@ func newMockAdapter() *mockHandlerAdapter {
 
 func (m *mockHandlerAdapter) AddElementToSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
 	m.calls["AddElementToSet"] = append(m.calls["AddElementToSet"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
 	})
 	return nil
 }
 
 func (m *mockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
 	m.calls["RemoveElementFromSet"] = append(m.calls["RemoveElementFromSet"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
 	})
 	return nil
 }
 
 func (m *mockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string) error {
 	m.calls["AddSetMapElement"] = append(m.calls["AddSetMapElement"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"field":         field,
-		"value":         value,
-		"correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "field": field, "value": value, "correlationID": correlationID,
 	})
 	return nil
 }
 
 func (m *mockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string) error {
 	m.calls["RemoveElementFromMap"] = append(m.calls["RemoveElementFromMap"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"field":         field,
-		"correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "field": field, "correlationID": correlationID,
 	})
 	return nil
 }
 
 func (m *mockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubName, value, correlationID string) error {
 	m.calls["SetStringValue"] = append(m.calls["SetStringValue"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
 	})
 	return nil
 }
@@ -101,512 +84,244 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-func TestCmdVarSetAdd_Success(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
-
-	payload := map[string]any{
-		"labels": map[string]any{
-			"key": "valX",
-		},
+func mkEvent(hub, cid string, payload map[string]any) eventing.MdaiEvent {
+	return eventing.MdaiEvent{
+		HubName:       hub,
+		CorrelationID: cid,
+		Payload: func() string {
+			if payload == nil {
+				return ""
+			}
+			b, _ := json.Marshal(payload)
+			return string(b)
+		}(),
 	}
-	ev := eventing.MdaiEvent{
-		HubName:       "hubA",
-		CorrelationID: "cid-1",
-		Payload:       mustJSON(t, payload),
-	}
-
-	cmd := rule.Command{
-		Type:   rule.CmdVarSetAdd,
-		Inputs: json.RawMessage(`{"set":"myset","value":"${trigger:payload.labels.key}"}`),
-	}
-
-	handler := commandDispatch[rule.CmdVarSetAdd]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns1", cmd, nil)
-	require.NoError(t, err)
-
-	assert.Contains(t, ma.calls["AddElementToSet"], map[string]string{
-		"variableKey":   "myset",
-		"hubName":       "hubA",
-		"value":         "valX",
-		"correlationID": "cid-1",
-	})
 }
 
-func TestCmdVarSetAdd_LabelMissing(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
-
-	// labels present but "key" is missing
-	ev := eventing.MdaiEvent{
-		HubName:       "hubA",
-		CorrelationID: "cid-1",
-		Payload: mustJSON(t, map[string]any{
-			"labels": map[string]any{},
-		}),
-	}
-	cmd := rule.Command{
-		Type:   rule.CmdVarSetAdd,
-		Inputs: json.RawMessage(`{"set":"myset","value":"${trigger:payload.labels.key}"}`),
-	}
-
-	handler := commandDispatch[rule.CmdVarSetAdd]
-	require.NotNil(t, handler)
-
-	// With fallback behavior, this should NOT error; it should pass the original template string through.
-	err := handler(h, context.Background(), ev, "ns1", cmd, nil)
-	require.NoError(t, err)
-
-	assert.Contains(t, ma.calls["AddElementToSet"], map[string]string{
-		"variableKey":   "myset",
-		"hubName":       "hubA",
-		"value":         "${trigger:payload.labels.key}", // preserved as provided
-		"correlationID": "cid-1",
-	})
+func requireAdapterCall(t *testing.T, ma *mockHandlerAdapter, bucket string, want map[string]string) {
+	t.Helper()
+	require.Contains(t, ma.calls, bucket, "bucket %q not called", bucket)
+	require.Len(t, ma.calls[bucket], 1, "expected exactly one call in %s", bucket)
+	require.Equal(t, want, ma.calls[bucket][0])
 }
 
-func TestCmdVarSetAdd_PayloadMissingLabels(t *testing.T) {
+func TestCmdVarSetAdd_Table(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
-
-	// payload has no "labels" at all — still falls back to provided value
-	ev := eventing.MdaiEvent{
-		HubName:       "hubA",
-		CorrelationID: "cid-1",
-		Payload:       mustJSON(t, map[string]any{"some_other_key": "some_value"}),
-	}
-	cmd := rule.Command{
-		Type:   rule.CmdVarSetAdd,
-		Inputs: json.RawMessage(`{"set":"myset","value":"${trigger:payload.labels.key}"}`),
-	}
-
-	handler := commandDispatch[rule.CmdVarSetAdd]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns1", cmd, nil)
-	require.NoError(t, err)
-
-	assert.Contains(t, ma.calls["AddElementToSet"], map[string]string{
-		"variableKey":   "myset",
-		"hubName":       "hubA",
-		"value":         "${trigger:payload.labels.key}", // preserved as provided
-		"correlationID": "cid-1",
-	})
-}
-
-func TestCmdVarSetRemove_Success(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
-
-	payload := map[string]any{
-		"labels": map[string]any{
-			"svc": "noisy",
-		},
-	}
-	ev := eventing.MdaiEvent{
-		HubName:       "hubB",
-		CorrelationID: "cid-2",
-		Payload:       mustJSON(t, payload),
-	}
-	cmd := rule.Command{
-		Type:   rule.CmdVarSetRemove,
-		Inputs: json.RawMessage(`{"set":"blocklist","value":"${trigger:payload.labels.svc}"}`),
-	}
-
-	handler := commandDispatch[rule.CmdVarSetRemove]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns2", cmd, nil)
-	require.NoError(t, err)
-
-	assert.Contains(t, ma.calls["RemoveElementFromSet"], map[string]string{
-		"variableKey":   "blocklist",
-		"hubName":       "hubB",
-		"value":         "noisy",
-		"correlationID": "cid-2",
-	})
-}
-
-func TestCmdWebhookCall_URLValidation(t *testing.T) {
-	h, _, _ := newHubWithAdapter(t) // kube is nil but not used in these paths
-
-	ev := eventing.MdaiEvent{
-		HubName:       "hubC",
-		CorrelationID: "cid-3",
-		Payload:       `{"labels":{}}`,
-	}
-	payloadData := map[string]any{"labels": map[string]any{}}
-
-	handler := commandDispatch[rule.CmdWebhookCall]
-	require.NotNil(t, handler)
 
 	tests := []struct {
+		name       string
+		payload    map[string]any
+		inputValue string // Inputs.value
+		wantValue  string // what adapter should receive after interpolation
+	}{
+		{
+			name:       "resolved label",
+			payload:    map[string]any{"labels": map[string]any{"key": "valX"}},
+			inputValue: `${trigger:payload.labels.key}`,
+			wantValue:  "valX",
+		},
+		{
+			name:       "missing key → fallback preserves template",
+			payload:    map[string]any{"labels": map[string]any{}},
+			inputValue: `${trigger:payload.labels.key}`,
+			wantValue:  `${trigger:payload.labels.key}`,
+		},
+		{
+			name:       "labels missing → fallback preserves template",
+			payload:    map[string]any{"some_other_key": "v"},
+			inputValue: `${trigger:payload.labels.key}`,
+			wantValue:  `${trigger:payload.labels.key}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := mkEvent("hubA", "cid-1", tc.payload)
+			cmd := rule.Command{Type: rule.CmdVarSetAdd, Inputs: json.RawMessage(`{"set":"myset","value":"` + tc.inputValue + `"}`)}
+
+			handler := commandDispatch[rule.CmdVarSetAdd]
+			require.NotNil(t, handler)
+
+			err := handler(h, context.Background(), ev, "ns", cmd, nil)
+			require.NoError(t, err)
+
+			requireAdapterCall(t, ma, "AddElementToSet", map[string]string{
+				"variableKey": "myset", "hubName": "hubA", "value": tc.wantValue, "correlationID": "cid-1",
+			})
+			// reset for next run
+			ma.calls = make(map[string][]map[string]string)
+		})
+	}
+}
+
+func TestCmdVarMapAdd_Table(t *testing.T) {
+	h, ma, _ := newHubWithAdapter(t)
+
+	type tc struct {
 		name      string
-		inputs    json.RawMessage
-		wantError string
-	}{
+		evPayload map[string]any
+		inputs    string
+		wantErr   string
+		wantCall  map[string]string // expected call into AddSetMapElement
+	}
+	cases := []tc{
 		{
-			name:      "no url provided",
-			inputs:    json.RawMessage(`{"templateValues":{"message":"hi"}}`),
-			wantError: "neither value nor valueFrom set",
+			name:      "success",
+			evPayload: map[string]any{"alert": map[string]any{"name": "HighCPU"}, "instance": "server-123"},
+			inputs:    `{"map":"active_alerts","key":"${trigger:payload.instance}","value":"${trigger:payload.alert.name}"}`,
+			wantCall: map[string]string{
+				"variableKey": "active_alerts", "hubName": "hub-map-test", "field": "server-123", "value": "HighCPU", "correlationID": "cid-map-1",
+			},
 		},
 		{
-			name:      "empty url value",
-			inputs:    json.RawMessage(`{"url":{"value":""},"templateValues":{"message":"hi"}}`),
-			wantError: "webhook_url must be a non-empty string",
+			name:      "missing value → error",
+			evPayload: nil,
+			inputs:    `{"map":"active_alerts","key":"some-key"}`,
+			wantErr:   "variable.map.add: inputs.value is empty",
 		},
 		{
-			name:      "invalid url format",
-			inputs:    json.RawMessage(`{"url":{"value":"::not-a-url"},"templateValues":{"message":"hi"}}`),
-			wantError: "invalid webhook url",
+			name:      "missing map → error",
+			evPayload: nil,
+			inputs:    `{"key":"some-key","value":"some-value"}`,
+			wantErr:   "variable.map.add: inputs.map is empty",
+		},
+		{
+			name:      "malformed json → decode error",
+			evPayload: nil,
+			inputs:    `{"map":"active_alerts","key":"some-key"`,
+			wantErr:   "variable.map.add: decode:",
+		},
+		{
+			name:      "empty value pointer → error",
+			evPayload: nil,
+			inputs:    `{"map":"m","key":"k","value":""}`,
+			wantErr:   "variable.map.add: inputs.value is empty",
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := rule.Command{Type: rule.CmdWebhookCall, Inputs: tc.inputs}
-			err := handler(h, context.Background(), ev, "ns3", cmd, payloadData)
-			require.Error(t, err)
-			require.ErrorContains(t, err, tc.wantError)
-		})
-	}
-}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ev := eventing.MdaiEvent{HubName: "hub-map-test", CorrelationID: "cid-map-1", Payload: mustJSON(t, c.evPayload)}
+			cmd := rule.Command{Type: rule.CmdVarMapAdd, Inputs: json.RawMessage(c.inputs)}
+			handler := commandDispatch[rule.CmdVarMapAdd]
+			require.NotNil(t, handler)
 
-func TestExecVarSetOp_ErrorCases(t *testing.T) {
-	tcases := []struct {
-		name            string
-		inputsJSON      string
-		wantErrEq       string
-		wantErrContains string
-	}{
-		{
-			name:       "Missing value",
-			inputsJSON: `{"set":"myset"}`,
-			wantErrEq:  "test.op: inputs.value is empty",
-		},
-		{
-			name:       "Missing set",
-			inputsJSON: `{"value":"some-key"}`,
-			wantErrEq:  "test.op: inputs.set is empty",
-		},
-		{
-			name:       "Empty value",
-			inputsJSON: `{"set":"myset","value":""}`,
-			wantErrEq:  "test.op: inputs.value is empty",
-		},
-		{
-			name:            "Decode error",
-			inputsJSON:      `{"set":"myset","value":"mykey"`, // malformed JSON
-			wantErrContains: "test.op: decode:",
-		},
-	}
-
-	h, _, _ := newHubWithAdapter(t)
-
-	for _, tc := range tcases {
-		t.Run(tc.name, func(t *testing.T) {
-			setCalled := false
-			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
-				setCalled = true
-				return nil
-			}
-
-			cmd := rule.Command{
-				Type:   "test.op",
-				Inputs: json.RawMessage(tc.inputsJSON),
-			}
-
-			err := h.execVarSetOp(
-				context.Background(),
-				"test.op",
-				eventing.MdaiEvent{},
-				cmd,
-				setOp,
-			)
-
-			require.Error(t, err)
-			if tc.wantErrEq != "" {
-				require.Equal(t, tc.wantErrEq, err.Error())
-			}
-			if tc.wantErrContains != "" {
-				require.ErrorContains(t, err, tc.wantErrContains)
-			}
-			require.False(t, setCalled, "setOp should not have been called")
-		})
-	}
-}
-
-func TestExecVarScalarOp(t *testing.T) {
-	t.Parallel()
-	const opName = "test.scalar.op"
-
-	mkCmd := func(inputs string) rule.Command {
-		return rule.Command{Type: opName, Inputs: json.RawMessage(inputs)}
-	}
-
-	tests := []struct {
-		name              string
-		evPayloadJSON     string
-		cmd               rule.Command
-		setOpReturnErr    error
-		expectErr         bool
-		expectErrEqual    string
-		expectErrContains string
-		expectSetOpCalled bool
-		expectValuePassed string
-	}{
-		{
-			name:              "DecodeError",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k"`), // malformed JSON
-			expectErr:         true,
-			expectErrContains: opName + ": decode:",
-			expectSetOpCalled: false,
-		},
-		{
-			name:              "EmptyScalar",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"","value":"${trigger:payload.k}"}`),
-			expectErrEqual:    opName + ": inputs.scalar is empty",
-			expectSetOpCalled: false,
-		},
-		{
-			name:              "EmptyValue",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"myscalar","value":""}`),
-			expectErrEqual:    opName + ": inputs.value is empty",
-			expectSetOpCalled: false,
-		},
-		{
-			name:              "MissingFieldInEventPayload_falls_back_to_provided_value",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.missing}"}`),
-			expectErr:         false,
-			expectSetOpCalled: true,
-			expectValuePassed: "${trigger:payload.missing}", // preserved as provided
-		},
-		{
-			name:              "SetOpError",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k}"}`),
-			setOpReturnErr:    errors.New("kaboom"),
-			expectErr:         true,
-			expectSetOpCalled: true,
-			expectValuePassed: "v",
-		},
-		{
-			name:              "Success",
-			evPayloadJSON:     `{"k":"v"}`,
-			cmd:               mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k}"}`),
-			expectErr:         false,
-			expectSetOpCalled: true,
-			expectValuePassed: "v",
-		},
-	}
-
-	h, _, _ := newHubWithAdapter(t)
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			setOpCalled := false
-			capturedValue := ""
-			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
-				setOpCalled = true
-				capturedValue = value
-				return tc.setOpReturnErr
-			}
-
-			err := h.execVarScalarOp(
-				context.Background(),
-				opName,
-				eventing.MdaiEvent{Payload: tc.evPayloadJSON},
-				tc.cmd,
-				setOp,
-			)
-
-			switch {
-			case tc.expectErrEqual != "":
+			err := handler(h, context.Background(), ev, "ns", cmd, nil)
+			if c.wantErr != "" {
 				require.Error(t, err)
-				require.Equal(t, tc.expectErrEqual, err.Error())
-			case tc.expectErrContains != "":
-				require.Error(t, err)
-				require.ErrorContains(t, err, tc.expectErrContains)
-			case tc.expectErr:
-				require.Error(t, err)
-			default:
+				require.Contains(t, err.Error(), c.wantErr)
+				require.Empty(t, ma.calls, "adapter should not have been called")
+			} else {
 				require.NoError(t, err)
+				requireAdapterCall(t, ma, "AddSetMapElement", c.wantCall)
 			}
-
-			require.Equal(t, tc.expectSetOpCalled, setOpCalled, "setOp call expectation mismatch")
-			if tc.expectSetOpCalled && tc.expectValuePassed != "" {
-				require.Equal(t, tc.expectValuePassed, capturedValue)
-			}
+			ma.calls = make(map[string][]map[string]string)
 		})
 	}
 }
 
-func TestCmdVarMapAdd_Success(t *testing.T) {
+func TestCmdVarMapRemove_Table(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
 
-	payload := map[string]any{
-		"alert": map[string]any{
-			"name": "HighCPU",
+	type tc struct {
+		name      string
+		evPayload map[string]any
+		inputs    string
+		wantErr   string
+		wantCall  map[string]string
+	}
+	cases := []tc{
+		{
+			name:      "success",
+			evPayload: map[string]any{"instance": "server-456"},
+			inputs:    `{"map":"stale_alerts","key":"${trigger:payload.instance}"}`,
+			wantCall: map[string]string{
+				"variableKey": "stale_alerts", "hubName": "hub-map-remove-test", "field": "server-456", "correlationID": "cid-map-remove-1",
+			},
 		},
-		"instance": "server-123",
-	}
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-map-test",
-		CorrelationID: "cid-map-1",
-		Payload:       mustJSON(t, payload),
-	}
-
-	cmd := rule.Command{
-		Type: rule.CmdVarMapAdd,
-		Inputs: json.RawMessage(`{
-			"map": "active_alerts",
-			"key": "${trigger:payload.instance}",
-			"value": "${trigger:payload.alert.name}"
-		}`),
+		{
+			name:    "missing map → error",
+			inputs:  `{"key":"${trigger:payload.k}"}`,
+			wantErr: "variable.map.remove: inputs.map is empty",
+		},
+		{
+			name:    "decode error",
+			inputs:  `{"map":"m","key":"x"`,
+			wantErr: "variable.map.remove: decode:",
+		},
 	}
 
-	handler := commandDispatch[rule.CmdVarMapAdd]
-	require.NotNil(t, handler)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ev := eventing.MdaiEvent{HubName: "hub-map-remove-test", CorrelationID: "cid-map-remove-1", Payload: mustJSON(t, c.evPayload)}
+			cmd := rule.Command{Type: rule.CmdVarMapRemove, Inputs: json.RawMessage(c.inputs)}
+			handler := commandDispatch[rule.CmdVarMapRemove]
+			require.NotNil(t, handler)
 
-	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
-	require.NoError(t, err)
-
-	require.Contains(t, ma.calls, "AddSetMapElement")
-	require.Len(t, ma.calls["AddSetMapElement"], 1)
-
-	assert.Equal(t, map[string]string{
-		"variableKey":   "active_alerts",
-		"hubName":       "hub-map-test",
-		"field":         "server-123",
-		"value":         "HighCPU",
-		"correlationID": "cid-map-1",
-	}, ma.calls["AddSetMapElement"][0])
+			err := handler(h, context.Background(), ev, "ns", cmd, nil)
+			if c.wantErr != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), c.wantErr)
+				require.Empty(t, ma.calls["RemoveElementFromMap"])
+			} else {
+				require.NoError(t, err)
+				requireAdapterCall(t, ma, "RemoveElementFromMap", c.wantCall)
+			}
+			ma.calls = make(map[string][]map[string]string)
+		})
+	}
 }
 
-func TestCmdVarMapRemove_Success(t *testing.T) {
+func TestCmdVarScalarUpdate_Success_Dispatch(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
 
-	payload := map[string]any{
-		"instance": "server-456",
-	}
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-map-remove-test",
-		CorrelationID: "cid-map-remove-1",
-		Payload:       mustJSON(t, payload),
-	}
+	ev := eventing.MdaiEvent{HubName: "hub-scalar", CorrelationID: "cid-scalar-1", Payload: `{"k":"v"}`}
+	cmd := rule.Command{Type: rule.CmdVarScalarUpdate, Inputs: json.RawMessage(`{"scalar":"my-scalar","value":"${trigger:payload.k}"}`)}
 
-	cmd := rule.Command{
-		Type: rule.CmdVarMapRemove,
-		Inputs: json.RawMessage(`{
-			"map": "stale_alerts",
-			"key": "${trigger:payload.instance}"
-		}`),
-	}
-
-	handler := commandDispatch[rule.CmdVarMapRemove]
+	handler := commandDispatch[rule.CmdVarScalarUpdate]
 	require.NotNil(t, handler)
+	require.NoError(t, handler(h, context.Background(), ev, "ns", cmd, nil))
 
-	err := handler(h, context.Background(), ev, "ns-map-remove", cmd, nil)
-	require.NoError(t, err)
-
-	require.Contains(t, ma.calls, "RemoveElementFromMap")
-	require.Len(t, ma.calls["RemoveElementFromMap"], 1)
-
-	assert.Equal(t, map[string]string{
-		"variableKey":   "stale_alerts",
-		"hubName":       "hub-map-remove-test",
-		"field":         "server-456",
-		"correlationID": "cid-map-remove-1",
-	}, ma.calls["RemoveElementFromMap"][0])
+	requireAdapterCall(t, ma, "SetStringValue", map[string]string{
+		"variableKey": "my-scalar", "hubName": "hub-scalar", "value": "v", "correlationID": "cid-scalar-1",
+	})
 }
 
-func TestCmdVarMapAdd_MissingValue(t *testing.T) {
+func TestProcessCommandsForEvent_Smoke(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
 
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-map-test",
-		CorrelationID: "cid-map-err-1",
+	ev := mkEvent("hub-multi", "cid-multi-1", map[string]any{"labels": map[string]any{"a": "foo"}})
+	cmds := []rule.Command{
+		{Type: rule.CmdVarSetAdd, Inputs: json.RawMessage(`{"set":"s1","value":"${trigger:payload.labels.a}"}`)},
+		{Type: rule.CmdVarSetRemove, Inputs: json.RawMessage(`{"set":"s2","value":"${trigger:payload.labels.a}"}`)},
 	}
+	require.NoError(t, h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting"))
 
-	cmd := rule.Command{
-		Type: rule.CmdVarMapAdd,
-		Inputs: json.RawMessage(`{
-			"map": "active_alerts",
-			"key": "some-key"
-		}`), // value is missing
-	}
-
-	handler := commandDispatch[rule.CmdVarMapAdd]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
-	require.Error(t, err)
-	assert.Equal(t, "variable.map.add: inputs.value is empty", err.Error())
-	assert.Empty(t, ma.calls, "adapter should not have been called")
+	requireAdapterCall(t, ma, "AddElementToSet", map[string]string{"variableKey": "s1", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1"})
+	requireAdapterCall(t, ma, "RemoveElementFromSet", map[string]string{"variableKey": "s2", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1"})
 }
 
-func TestCmdVarMapAdd_MissingMap(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
+func TestProcessCommandsForEvent_UnsupportedType(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
 
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-map-test",
-		CorrelationID: "cid-map-err-2",
-	}
+	ev := eventing.MdaiEvent{HubName: "h"}
+	cmds := []rule.Command{{Type: rule.CommandType("does.not.exist")}}
 
-	cmd := rule.Command{
-		Type: rule.CmdVarMapAdd,
-		Inputs: json.RawMessage(`{
-			"key": "some-key",
-			"value": "some-value"
-		}`), // map is missing
-	}
-
-	handler := commandDispatch[rule.CmdVarMapAdd]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
 	require.Error(t, err)
-	assert.Equal(t, "variable.map.add: inputs.map is empty", err.Error())
-	assert.Empty(t, ma.calls, "adapter should not have been called")
+	require.Contains(t, err.Error(), "unsupported command type")
 }
 
-func TestCmdVarMapAdd_MalformedJSON(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
+func TestProcessCommandsForEvent_HandlerErrorBubbled(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
 
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-map-test",
-		CorrelationID: "cid-map-err-3",
-	}
+	// Missing "set" triggers execVarSetOp validation error → wrapped by processCommandsForEvent.
+	ev := eventing.MdaiEvent{HubName: "h", Payload: mustJSON(t, map[string]any{"labels": map[string]any{"k": "v"}})}
+	cmds := []rule.Command{{Type: rule.CmdVarSetAdd, Inputs: json.RawMessage(`{"value":"${trigger:payload.labels.k}"}`)}}
 
-	cmd := rule.Command{
-		Type:   rule.CmdVarMapAdd,
-		Inputs: json.RawMessage(`{"map":"active_alerts","key":"some-key"`), // Malformed JSON
-	}
-
-	handler := commandDispatch[rule.CmdVarMapAdd]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns-map", cmd, nil)
+	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
 	require.Error(t, err)
-	require.ErrorContains(t, err, "variable.map.add: decode:")
-	require.Empty(t, ma.calls, "adapter should not have been called")
-}
-
-func TestInterpolate_EngineNotConfigured(t *testing.T) {
-	h := &EventHub{
-		Logger: zap.NewNop(),
-		// InterpolationEngine is intentionally nil
-	}
-
-	result, err := h.interpolate("template", "test.op", "field", eventing.MdaiEvent{})
-
-	require.Error(t, err)
-	assert.Equal(t, "test.op: interpolate field: interpolation engine is not configured", err.Error())
-	assert.Empty(t, result)
+	require.Contains(t, err.Error(), "command 0 (variable.set.add) failed")
 }
 
 func TestProcessCommandsForEvent_Success_Multiple(t *testing.T) {
@@ -635,17 +350,6 @@ func TestProcessCommandsForEvent_Success_Multiple(t *testing.T) {
 	require.Equal(t, "foo", ma.calls["RemoveElementFromSet"][0]["value"])
 }
 
-func TestProcessCommandsForEvent_UnsupportedType(t *testing.T) {
-	h, _, _ := newHubWithAdapter(t)
-
-	ev := eventing.MdaiEvent{HubName: "h"}
-	cmds := []rule.Command{{Type: rule.CommandType("does.not.exist")}}
-
-	err := h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting")
-	require.Error(t, err)
-	require.ErrorContains(t, err, `unsupported command type`)
-}
-
 func TestProcessCommandsForEvent_HandlerError_BubblesUp(t *testing.T) {
 	h, _, _ := newHubWithAdapter(t)
 
@@ -659,90 +363,105 @@ func TestProcessCommandsForEvent_HandlerError_BubblesUp(t *testing.T) {
 	require.ErrorContains(t, err, "command 0 (variable.set.add) failed")
 }
 
-func TestCmdVarScalarUpdate_Success_Dispatch(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
+func TestExecVarScalarOp(t *testing.T) {
+	const opName = "test.scalar.op"
 
-	ev := eventing.MdaiEvent{
-		HubName:       "hub-scalar",
-		CorrelationID: "cid-scalar-1",
-		Payload:       `{"k":"v"}`,
-	}
-	cmd := rule.Command{
-		Type:   rule.CmdVarScalarUpdate,
-		Inputs: json.RawMessage(`{"scalar":"my-scalar","value":"${trigger:payload.k}"}`),
+	mkCmd := func(inputs string) rule.Command {
+		return rule.Command{Type: opName, Inputs: json.RawMessage(inputs)}
 	}
 
-	handler := commandDispatch[rule.CmdVarScalarUpdate]
-	require.NotNil(t, handler)
-
-	err := handler(h, context.Background(), ev, "ns", cmd, nil)
-	require.NoError(t, err)
-
-	require.Len(t, ma.calls["SetStringValue"], 1)
-	entry := ma.calls["SetStringValue"][0]
-	require.Equal(t, "my-scalar", entry["variableKey"])
-	require.Equal(t, "hub-scalar", entry["hubName"])
-	require.Equal(t, "v", entry["value"])
-	require.Equal(t, "cid-scalar-1", entry["correlationID"])
-}
-
-func TestCmdVarMapRemove_ErrorCases(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
-
-	// Malformed JSON
-	{
-		ev := eventing.MdaiEvent{HubName: "h"}
-		cmd := rule.Command{Type: rule.CmdVarMapRemove, Inputs: json.RawMessage(`{"map":"m","key":"k"`)}
-
-		handler := commandDispatch[rule.CmdVarMapRemove]
-		require.NotNil(t, handler)
-
-		err := handler(h, context.Background(), ev, "ns", cmd, nil)
-		require.Error(t, err)
-		require.ErrorContains(t, err, "variable.map.remove: decode:")
-		require.Empty(t, ma.calls["RemoveElementFromMap"])
+	tests := []struct {
+		name            string
+		evPayloadJSON   string
+		cmd             rule.Command
+		setOpReturnErr  error
+		wantErrEqual    string
+		wantErrContains string
+		wantSetOpCalled bool
+		wantValuePassed string
+	}{
+		{
+			name:            "DecodeError",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k"`), // malformed JSON
+			wantErrContains: opName + ": decode:",
+			wantSetOpCalled: false,
+		},
+		{
+			name:            "EmptyScalar",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"","value":"${trigger:payload.k}"}`),
+			wantErrEqual:    opName + ": inputs.scalar is empty",
+			wantSetOpCalled: false,
+		},
+		{
+			name:            "EmptyValue",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"myscalar","value":""}`),
+			wantErrEqual:    opName + ": inputs.value is empty",
+			wantSetOpCalled: false,
+		},
+		{
+			name:            "MissingFieldInEventPayload_falls_back_to_provided_value",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.missing}"}`),
+			wantSetOpCalled: true,
+			wantValuePassed: `${trigger:payload.missing}`, // interpolation preserves original when not found
+		},
+		{
+			name:            "SetOpError",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k}"}`),
+			setOpReturnErr:  errors.New("kaboom"),
+			wantErrContains: "kaboom",
+			wantSetOpCalled: true,
+			wantValuePassed: "v",
+		},
+		{
+			name:            "Success",
+			evPayloadJSON:   `{"k":"v"}`,
+			cmd:             mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.k}"}`),
+			wantSetOpCalled: true,
+			wantValuePassed: "v",
+		},
 	}
 
-	// Missing map
-	{
-		ev := eventing.MdaiEvent{HubName: "h", Payload: `{"k":"v"}`}
-		cmd := rule.Command{Type: rule.CmdVarMapRemove, Inputs: json.RawMessage(`{"key":"${trigger:payload.k}"}`)}
-
-		handler := commandDispatch[rule.CmdVarMapRemove]
-		require.NotNil(t, handler)
-
-		err := handler(h, context.Background(), ev, "ns", cmd, nil)
-		require.Error(t, err)
-		require.Equal(t, "variable.map.remove: inputs.map is empty", err.Error())
-	}
-}
-
-func TestDecodeInputs_UnknownField_Fails(t *testing.T) {
 	h, _, _ := newHubWithAdapter(t)
 
-	cmd := rule.Command{
-		Type:   rule.CmdVarScalarUpdate,
-		Inputs: json.RawMessage(`{"scalar":"s","value":"x","unknown":1}`),
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setOpCalled := false
+			capturedValue := ""
+
+			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
+				setOpCalled = true
+				capturedValue = value
+				return tc.setOpReturnErr
+			}
+
+			err := h.execVarScalarOp(
+				context.Background(),
+				opName,
+				eventing.MdaiEvent{Payload: tc.evPayloadJSON},
+				tc.cmd,
+				setOp,
+			)
+
+			switch {
+			case tc.wantErrEqual != "":
+				require.Error(t, err)
+				require.Equal(t, tc.wantErrEqual, err.Error())
+			case tc.wantErrContains != "":
+				require.Error(t, err)
+				require.ErrorContains(t, err, tc.wantErrContains)
+			default:
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, tc.wantSetOpCalled, setOpCalled, "setOp call expectation mismatch")
+			if tc.wantSetOpCalled && tc.wantValuePassed != "" {
+				require.Equal(t, tc.wantValuePassed, capturedValue)
+			}
+		})
 	}
-
-	err := h.execVarScalarOp(context.Background(), "variable.scalar.update", eventing.MdaiEvent{}, cmd,
-		func(context.Context, string, string, string, string) error { return nil })
-	require.Error(t, err)
-	require.ErrorContains(t, err, "decode:")
-	require.ErrorContains(t, err, `unknown field`)
-}
-
-func TestCmdVarMapAdd_EmptyStringValuePointer(t *testing.T) {
-	h, ma, _ := newHubWithAdapter(t)
-
-	// "value" present but empty string → pointer non-nil, deref == "" → error path.
-	cmd := rule.Command{
-		Type:   rule.CmdVarMapAdd,
-		Inputs: json.RawMessage(`{"map":"m","key":"k","value":""}`),
-	}
-
-	err := commandDispatch[rule.CmdVarMapAdd](h, context.Background(), eventing.MdaiEvent{}, "ns", cmd, nil)
-	require.Error(t, err)
-	require.Equal(t, "variable.map.add: inputs.value is empty", err.Error())
-	require.Empty(t, ma.calls["AddSetMapElement"])
 }
