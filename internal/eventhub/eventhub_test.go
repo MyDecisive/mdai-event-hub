@@ -99,15 +99,17 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 		return ok
 	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
 
+	payload := map[string]any{
+		"labels": map[string]any{
+			"the_key": "the-value",
+		},
+	}
+
 	event := eventing.MdaiEvent{
 		Name:          "test-alert.firing",
 		HubName:       "hub-x",
 		CorrelationID: "cid-rule-1",
-	}
-	payload := map[string]any{
-		"labels": map[string]any{
-			"the-key": "the-value",
-		},
+		Payload:       mustJSON(t, payload),
 	}
 
 	err := h.processCommandsForEvent(
@@ -116,11 +118,11 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 		[]rule.Command{
 			{
 				Type:   rule.CmdVarSetAdd,
-				Inputs: json.RawMessage(`{"set":"my-test-set","value":"the-key"}`),
+				Inputs: json.RawMessage(`{"set":"my-test-set","value":"${trigger:payload.labels.the_key}"}`),
 			},
 		},
 		"ns-1",
-		payload,
+		nil,
 		"alerting",
 	)
 	require.NoError(t, err)
@@ -135,44 +137,6 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 	require.Equal(t, "hub-x", got["hubName"])
 	require.Equal(t, "the-value", got["value"])
 	require.Equal(t, "cid-rule-1", got["correlationID"])
-}
-
-func TestProcessRuleForAlertingEvent_CommandHandlerFails(t *testing.T) {
-	h, _, client := newHubWithAdapter(t)
-	// Expect an audit log call for the failed command
-	client.EXPECT().Do(mock.MatchedBy(func(arg any) bool {
-		_, ok := arg.(context.Context)
-		return ok
-	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).Times(1)
-
-	event := eventing.MdaiEvent{
-		Name:          "any.firing",
-		HubName:       "hub-y",
-		CorrelationID: "cid-fail-1",
-	}
-	// Payload is missing "missing-key", which will cause the handler to fail.
-	payload := map[string]any{
-		"labels": map[string]any{
-			"some-other-key": "some-value",
-		},
-	}
-
-	err := h.processCommandsForEvent(
-		context.Background(),
-		event,
-		[]rule.Command{
-			{
-				Type:   rule.CmdVarSetAdd,
-				Inputs: json.RawMessage(`{"set":"my-set","value":"missing-key"}`),
-			},
-		},
-		"ns-2",
-		payload,
-		"alerting",
-	)
-
-	require.Error(t, err)
-	require.ErrorContains(t, err, `label "missing-key" not found in payload`)
 }
 
 func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {

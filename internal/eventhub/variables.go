@@ -59,6 +59,8 @@ func (v *VarDeps) HandleManualVariablesActions(ctx context.Context, event eventi
 			return errors.New("data should be a string")
 		}
 		return v.HandlerAdapter.SetStringValue(ctx, payloadObj.VariableRef, event.HubName, value, correlationID)
+	case rule.CmdWebhookCall:
+		return fmt.Errorf("unsupported command: %s", cmd.String())
 	default:
 		return fmt.Errorf("unsupported data type: %s", payloadObj.DataType)
 	}

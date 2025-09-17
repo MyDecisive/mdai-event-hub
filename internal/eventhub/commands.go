@@ -15,6 +15,7 @@ import (
 
 type cmdHandler func(h *EventHub, ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error
 
+//nolint:gochecknoglobals
 var commandDispatch = map[rule.CommandType]cmdHandler{
 	rule.CmdVarSetAdd:       (*EventHub).cmdVarSetAdd,
 	rule.CmdVarSetRemove:    (*EventHub).cmdVarSetRemove,
@@ -25,6 +26,7 @@ var commandDispatch = map[rule.CommandType]cmdHandler{
 	rule.CmdWebhookCall: (*EventHub).cmdWebhookCall,
 }
 
+//nolint:unparam // retained for future contexts (alerting|replay|manual)
 func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.MdaiEvent, commands []rule.Command, namespace string, payloadData map[string]any, eventType string) error {
 	logger := h.withEvent(event, eventType).With(zap.String("namespace", namespace))
 
@@ -88,19 +90,19 @@ func (h *EventHub) execVarSetOp(
 }
 
 func (h *EventHub) cmdVarSetAdd(
-	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any,
 ) error {
 	return h.execVarSetOp(ctx, string(rule.CmdVarSetAdd), ev, cmd, h.VarsAdapter.HandlerAdapter.AddElementToSet)
 }
 
 func (h *EventHub) cmdVarSetRemove(
-	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any,
 ) error {
 	return h.execVarSetOp(ctx, string(rule.CmdVarSetRemove), ev, cmd, h.VarsAdapter.HandlerAdapter.RemoveElementFromSet)
 }
 
 func (h *EventHub) cmdVarMapAdd(
-	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any,
 ) error {
 	opName := rule.CmdVarMapAdd.String()
 	var in mdaiv1.MapAction
@@ -127,7 +129,7 @@ func (h *EventHub) cmdVarMapAdd(
 }
 
 func (h *EventHub) cmdVarMapRemove(
-	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any,
+	ctx context.Context, event eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any,
 ) error {
 	opName := rule.CmdVarMapRemove.String()
 	var in mdaiv1.MapAction
@@ -149,11 +151,7 @@ func (h *EventHub) cmdVarMapRemove(
 	return h.VarsAdapter.HandlerAdapter.RemoveMapEntry(ctx, in.Map, event.HubName, key, event.CorrelationID)
 }
 
-func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
-	return HandleCallSlackWebhookFn(ctx, h.Kube, ns, ev, cmd.Inputs, payload)
-}
-
-func (h *EventHub) cmdVarScalarUpdate(ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, payload map[string]any) error {
+func (h *EventHub) cmdVarScalarUpdate(ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any) error {
 	return h.execVarScalarOp(ctx, string(rule.CmdVarScalarUpdate), ev, cmd, h.VarsAdapter.HandlerAdapter.SetStringValue)
 }
 
@@ -181,6 +179,10 @@ func (h *EventHub) execVarScalarOp(
 	}
 
 	return op(ctx, in.Scalar, event.HubName, val, event.CorrelationID)
+}
+
+func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
+	return HandleCallSlackWebhookFn(ctx, h.Kube, ns, ev, cmd.Inputs, payload)
 }
 
 func DecodeInputs[T any](raw json.RawMessage, out *T) error {
