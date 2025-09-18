@@ -34,12 +34,12 @@ func main() {
 	}()
 
 	// prometheus alerts
-	if err := eventSubscriber.Subscribe(ctx, eventing.AlertConsumerGroupName, "alert", eventhub.WithRecover(logger, eventHub.ProcessAlertingEvent(ctx))); err != nil {
+	if err := eventSubscriber.Subscribe(ctx, eventing.AlertConsumerGroupName.String(), "alert", eventhub.WithRecover(logger, eventHub.ProcessAlertingEvent(ctx))); err != nil {
 		logger.Fatal("Failed to start Alerts event listener", zap.Error(err))
 	}
 
 	// manual variables updates
-	if err := eventSubscriber.Subscribe(ctx, eventing.VarsConsumerGroupName, "var", eventhub.WithRecover(logger, eventHub.ProcessVariableEvent(ctx))); err != nil {
+	if err := eventSubscriber.Subscribe(ctx, eventing.VarsConsumerGroupName.String(), "var", eventhub.WithRecover(logger, eventHub.ProcessVariableEvent(ctx))); err != nil {
 		logger.Fatal("Failed to start Vars event listener", zap.Error(err))
 	}
 

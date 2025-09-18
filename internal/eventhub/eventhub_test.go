@@ -3,6 +3,7 @@ package eventhub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/valkey-io/valkey-go"
@@ -51,18 +53,13 @@ func TestProcessAlertingEvent_UnsupportedSource(t *testing.T) {
 func TestProcessRuleForAlertingEvent_UnsupportedCommand(t *testing.T) {
 	h := &EventHub{Logger: zap.NewNop()}
 
-	r := rule.Rule{
-		Name:     "unsupported",
-		Trigger:  &triggers.AlertTrigger{Name: "x", Status: "firing"},
-		Commands: []rule.Command{{Type: "unknown.cmd"}},
-	}
-
-	err := h.processRuleForAlertingEvent(
+	err := h.processCommandsForEvent(
 		context.Background(),
 		eventing.MdaiEvent{Name: "x.firing", HubName: "t7y"},
-		r,
+		[]rule.Command{{Type: "unknown.cmd"}},
 		"ns",
 		map[string]any{},
+		"alerting",
 	)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "unsupported command type")
@@ -71,18 +68,13 @@ func TestProcessRuleForAlertingEvent_UnsupportedCommand(t *testing.T) {
 func TestProcessRuleForAlertingEvent_NoCommands(t *testing.T) {
 	h := &EventHub{Logger: zap.NewNop()}
 
-	r := rule.Rule{
-		Name:     "empty",
-		Trigger:  &triggers.AlertTrigger{Name: "x", Status: "firing"},
-		Commands: nil,
-	}
-
-	err := h.processRuleForAlertingEvent(
+	err := h.processCommandsForEvent(
 		context.Background(),
 		eventing.MdaiEvent{Name: "x.firing", HubName: "t7y"},
-		r,
+		nil,
 		"ns",
 		map[string]any{},
+		"alerting",
 	)
 	require.NoError(t, err)
 }
@@ -108,17 +100,9 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 		return ok
 	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
 
-	r := rule.Rule{
-		Name: "test-rule",
-		Trigger: &triggers.AlertTrigger{
-			Name:   "test-alert",
-			Status: "firing",
-		},
-		Commands: []rule.Command{
-			{
-				Type:   CmdVarSetAdd,
-				Inputs: json.RawMessage(`{"set":"my-test-set","value":"the-key"}`),
-			},
+	payload := map[string]any{
+		"labels": map[string]any{
+			"the_key": "the-value",
 		},
 	}
 
@@ -126,19 +110,21 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 		Name:          "test-alert.firing",
 		HubName:       "hub-x",
 		CorrelationID: "cid-rule-1",
-	}
-	payload := map[string]any{
-		"labels": map[string]any{
-			"the-key": "the-value",
-		},
+		Payload:       mustJSON(t, payload),
 	}
 
-	err := h.processRuleForAlertingEvent(
+	err := h.processCommandsForEvent(
 		context.Background(),
 		event,
-		r,
+		[]rule.Command{
+			{
+				Type:   rule.CmdVarSetAdd,
+				Inputs: json.RawMessage(`{"set":"my-test-set","value":"${trigger:payload.labels.the_key}"}`),
+			},
+		},
 		"ns-1",
-		payload,
+		nil,
+		"alerting",
 	)
 	require.NoError(t, err)
 
@@ -152,48 +138,6 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 	require.Equal(t, "hub-x", got["hubName"])
 	require.Equal(t, "the-value", got["value"])
 	require.Equal(t, "cid-rule-1", got["correlationID"])
-}
-
-func TestProcessRuleForAlertingEvent_CommandHandlerFails(t *testing.T) {
-	h, _, client := newHubWithAdapter(t)
-	// Expect an audit log call for the failed command
-	client.EXPECT().Do(mock.MatchedBy(func(arg any) bool {
-		_, ok := arg.(context.Context)
-		return ok
-	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).Times(1)
-
-	r := rule.Rule{
-		Name: "test-rule-fail",
-		Commands: []rule.Command{
-			{
-				Type:   CmdVarSetAdd,
-				Inputs: json.RawMessage(`{"set":"my-set","value":"missing-key"}`),
-			},
-		},
-	}
-
-	event := eventing.MdaiEvent{
-		Name:          "any.firing",
-		HubName:       "hub-y",
-		CorrelationID: "cid-fail-1",
-	}
-	// Payload is missing "missing-key", which will cause the handler to fail.
-	payload := map[string]any{
-		"labels": map[string]any{
-			"some-other-key": "some-value",
-		},
-	}
-
-	err := h.processRuleForAlertingEvent(
-		context.Background(),
-		event,
-		r,
-		"ns-2",
-		payload,
-	)
-
-	require.Error(t, err)
-	require.ErrorContains(t, err, `label "missing-key" not found in payload`)
 }
 
 func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {
@@ -273,7 +217,7 @@ func TestGetRulesMap_BuildsValidRuleAndFallsBackName(t *testing.T) {
 	require.True(t, isAlert)
 
 	require.Len(t, r.Commands, 1)
-	require.Equal(t, "variable.set.add", r.Commands[0].Type)
+	require.Equal(t, "variable.set.add", string(r.Commands[0].Type))
 }
 
 func TestGetRulesMap_SkipsInvalidEntries(t *testing.T) {
@@ -353,4 +297,126 @@ func TestMatchedRules_MultipleMatches(t *testing.T) {
 	resultNames := []string{result[0].Name, result[1].Name}
 	require.Contains(t, resultNames, "rule1-match")
 	require.Contains(t, resultNames, "rule3-match-any-status")
+}
+
+func TestProcessEventPayload_Success(t *testing.T) {
+	validJSON := `{"key1":"value1","key2":42,"nested":{"sub":"val"}}`
+	event := eventing.MdaiEvent{
+		ID:      "e1",
+		Name:    "test",
+		HubName: "hub1",
+		Payload: validJSON,
+	}
+
+	result, err := processEventPayload(event)
+	require.NoError(t, err, "expected no error for valid JSON payload")
+
+	assert.Contains(t, result, "key1")
+	assert.Contains(t, result, "key2")
+	assert.Contains(t, result, "nested")
+
+	assert.Equal(t, "value1", result["key1"])
+	assert.InDelta(t, float64(42), result["key2"], 0.001)
+	nested, ok := result["nested"].(map[string]any)
+	assert.True(t, ok, "expected nested to be a map[string]any")
+	assert.Equal(t, "val", nested["sub"])
+}
+
+func TestProcessEventPayload_InvalidJSON(t *testing.T) {
+	invalidJSON := `{"key1":"value1", "key2":}`
+	event := eventing.MdaiEvent{
+		ID:      "e2",
+		Name:    "test-invalid",
+		HubName: "hub2",
+		Payload: invalidJSON,
+	}
+
+	result, err := processEventPayload(event)
+	assert.Nil(t, result, "expected result to be nil on invalid JSON")
+	require.Error(t, err, "expected an error for invalid JSON payload")
+	assert.Contains(t, err.Error(), "failed to unmarshal payload")
+}
+
+func TestProcessEventPayload_EmptyPayload(t *testing.T) {
+	t.Parallel()
+
+	ev := eventing.MdaiEvent{HubName: "hub", Name: "x.firing", Payload: ""}
+	got, err := processEventPayload(ev)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+func TestMatchedRules_NoDotInEventName(t *testing.T) {
+	t.Parallel()
+
+	// When eventName has no ".", status is empty and name == whole string.
+	rules := map[string]rule.Rule{
+		"need-any-status": {
+			Name: "any-status",
+			Trigger: &triggers.AlertTrigger{
+				Name:   "cpu_spike",
+				Status: "", // match any status
+			},
+		},
+		"need-firing": {
+			Name: "need-firing",
+			Trigger: &triggers.AlertTrigger{
+				Name:   "cpu_spike",
+				Status: "firing", // should NOT match (event has empty status)
+			},
+		},
+	}
+
+	result := matchedRules("cpu_spike", rules)
+	require.Len(t, result, 1)
+	require.Equal(t, "any-status", result[0].Name)
+}
+
+func TestGetRulesMap_SkipsUnknownTopLevelFields(t *testing.T) {
+	t.Parallel()
+
+	hubData := map[string]string{
+		"r1": `{
+			"name":"ok",
+			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
+			"commands":[]
+		}`,
+		"r2": `{
+			"name":"has-extra",
+			"extra": 123,
+			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
+			"commands":[]
+		}`,
+	}
+	got := getRulesMap(zap.NewNop(), hubData)
+	// r2 is skipped, r1 is kept.
+	require.Len(t, got, 1)
+	_, ok := got["r1"]
+	require.True(t, ok)
+	_, hasR2 := got["r2"]
+	require.False(t, hasR2)
+}
+
+func TestWithRecover_PropagatesError_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("boom")
+	handler := func(event eventing.MdaiEvent) error { return sentinel }
+
+	wrapped := WithRecover(zap.NewNop(), handler)
+	err := wrapped(eventing.MdaiEvent{ID: "e"})
+	require.Error(t, err)
+	require.Equal(t, sentinel, err)
+}
+
+func TestWithRecover_PanicNonStringValue(t *testing.T) {
+	t.Parallel()
+
+	handler := func(event eventing.MdaiEvent) error { panic(42) }
+	wrapped := WithRecover(zap.NewNop(), handler)
+
+	err := wrapped(eventing.MdaiEvent{ID: "e2"})
+	require.Error(t, err)
+	require.Equal(t, "panic: 42", err.Error())
 }
