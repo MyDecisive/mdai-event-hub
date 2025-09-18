@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
@@ -57,8 +58,11 @@ func (h *EventHub) interpolate(tmpl, opName, what string, event eventing.MdaiEve
 	if h.InterpolationEngine == nil {
 		return "", fmt.Errorf("%s: interpolate %s: interpolation engine is not configured", opName, what)
 	}
-	v := h.InterpolationEngine.Interpolate(tmpl, &event)
-	return v, nil
+	value := h.InterpolationEngine.Interpolate(tmpl, &event)
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%s: interpolate %s produced empty (template=%q)", opName, what, tmpl)
+	}
+	return value, nil
 }
 
 type setOp func(ctx context.Context, variableKey, hubName, value, correlationID string) error

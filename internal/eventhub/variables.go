@@ -38,8 +38,7 @@ func (v *VarDeps) HandleManualVariablesActions(ctx context.Context, event eventi
 	if payloadObj.DataType == "string" || payloadObj.DataType == "int" || payloadObj.DataType == "boolean" {
 		cmd = rule.CmdVarScalarUpdate
 	} else {
-		cmd, err = rule.ParseCommandType("variable" + "." + payloadObj.DataType + "." + payloadObj.Operation)
-		if err != nil {
+		if cmd, err = rule.ParseCommandType("variable" + "." + payloadObj.DataType + "." + payloadObj.Operation); err != nil {
 			return err
 		}
 	}

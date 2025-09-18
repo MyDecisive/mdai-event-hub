@@ -465,3 +465,28 @@ func TestExecVarScalarOp(t *testing.T) {
 		})
 	}
 }
+
+func TestInterpolate_EngineNotConfigured(t *testing.T) {
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: nil,
+	}
+
+	res, err := h.interpolate("template", "test.op", "value", eventing.MdaiEvent{})
+	require.Error(t, err)
+	require.Equal(t, "test.op: interpolate value: interpolation engine is not configured", err.Error())
+	require.Empty(t, res)
+}
+
+func TestInterpolate_WhitespaceResult(t *testing.T) {
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+
+	tmpl := "   "
+	res, err := h.interpolate(tmpl, "test.op", "value", eventing.MdaiEvent{})
+	require.Error(t, err)
+	require.Equal(t, `test.op: interpolate value produced empty (template="   ")`, err.Error())
+	require.Empty(t, res)
+}

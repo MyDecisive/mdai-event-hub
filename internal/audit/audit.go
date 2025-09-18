@@ -21,7 +21,7 @@ func RecordAuditEventFromMdaiEvent(ctx context.Context, logger *zap.Logger, audi
 		"timestamp":            event.Timestamp.UTC().Format(time.RFC3339),
 		"payload":              event.Payload,
 		"source":               event.Source,
-		"sourceId":             event.SourceID,
+		"source_id":            event.SourceID,
 		"correlation_id":       event.CorrelationID,
 		"hub_name":             event.HubName,
 		"automation_succeeded": strconv.FormatBool(success),

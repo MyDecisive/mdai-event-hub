@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"github.com/decisiveai/mdai-data-core/audit"
@@ -33,6 +34,8 @@ func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.Handler
 				log.Error("handler panic",
 					zap.String("panic", fmt.Sprint(r)),
 					zap.String("eventID", event.ID),
+					zap.String("correlation_id", event.CorrelationID),
+					zap.ByteString("stack", debug.Stack()),
 				)
 				err = fmt.Errorf("panic: %v", r)
 			}
@@ -59,7 +62,7 @@ func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInv
 		logger.Info("Processing variable event")
 
 		if event.Source != eventing.ManualVariablesEventSource {
-			logger.Warn("Unsupported manual variable update event source,skipping")
+			logger.Warn("Unsupported manual variable update event source, skipping")
 			return nil // non-transient
 		}
 
@@ -144,7 +147,7 @@ func matchedRules(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
 	}
 
 	matched := make([]rule.Rule, 0, len(rulesMap))
-	for _, r := range rulesMap {
+	for _, r := range rulesMap { // iterate over all alerting rules, order is not guaranteed
 		if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
 			matched = append(matched, r)
 		}
@@ -159,8 +162,7 @@ func processEventPayload(event eventing.MdaiEvent) (map[string]any, error) {
 
 	var payloadData map[string]any
 
-	err := json.Unmarshal([]byte(event.Payload), &payloadData)
-	if err != nil {
+	if err := json.Unmarshal([]byte(event.Payload), &payloadData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal payload %q: %w", event.Payload, err)
 	}
 

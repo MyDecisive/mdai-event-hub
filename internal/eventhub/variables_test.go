@@ -220,3 +220,5 @@ func TestHandleManualVariablesActions(t *testing.T) {
 		})
 	}
 }
+
+var _ iHandlerAdapter = (*MockHandlerAdapter)(nil)

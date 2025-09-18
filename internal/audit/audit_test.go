@@ -38,7 +38,7 @@ func TestRecordAuditEventFromMdaiEvent(t *testing.T) {
 		"timestamp":            "2025-07-19T12:00:00Z",
 		"payload":              "{}",
 		"source":               "source",
-		"sourceId":             "src1",
+		"source_id":            "src1",
 		"correlation_id":       "cid1",
 		"hub_name":             "hub",
 		"automation_name":      "rule1",

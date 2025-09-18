@@ -175,7 +175,7 @@ func TestHandleCallSlackWebhook_Success_WithLiteralURL(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
 	kube := k8sfake.NewClientset()
 
