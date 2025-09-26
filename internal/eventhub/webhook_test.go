@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -702,164 +703,193 @@ func TestReadConfigMapKey_DataBranch(t *testing.T) {
 	require.Equal(t, "v", v) // TrimSpace applied
 }
 
-func TestResolveAllHeaders_FromSecret(t *testing.T) {
+func TestResolveAllHeaders(t *testing.T) {
 	t.Parallel()
 
-	ns := "test-ns"
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "header-secret",
-			Namespace: ns,
+	tests := []struct {
+		name              string
+		preload           []runtime.Object
+		ns                string
+		baseHeaders       map[string]string
+		from              map[string]mdaiv1.ValueFromSource
+		want              http.Header
+		wantErrSubstrings []string
+	}{
+		{
+			name: "from Secret (success)",
+			preload: []runtime.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "header-secret", Namespace: "test-ns"},
+					Data:       map[string][]byte{"token": []byte("my-secret-token")},
+				},
+			},
+			ns:          "test-ns",
+			baseHeaders: map[string]string{"Content-Type": "application/json"},
+			from: map[string]mdaiv1.ValueFromSource{
+				"Authorization": {
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "header-secret"},
+						Key:                  "token",
+					},
+				},
+			},
+			want: func() http.Header {
+				h := http.Header{}
+				h.Set("Content-Type", "application/json")
+				h.Set("Authorization", "my-secret-token")
+				return h
+			}(),
 		},
-		Data: map[string][]byte{
-			"token": []byte("my-secret-token"),
+		{
+			name: "from ConfigMap (success)",
+			preload: []runtime.Object{
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: "header-cm", Namespace: "ns1"},
+					Data:       map[string]string{"auth-token": "my-secret-token"},
+				},
+			},
+			ns:          "ns1",
+			baseHeaders: map[string]string{"x-request-id": "abc-123"},
+			from: map[string]mdaiv1.ValueFromSource{
+				"Authorization": {
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "header-cm"},
+						Key:                  "auth-token",
+					},
+				},
+			},
+			want: func() http.Header {
+				h := http.Header{}
+				h.Set("Authorization", "my-secret-token")
+				h.Set("X-Request-Id", "abc-123")
+				return h
+			}(),
 		},
-	}
-	kube := k8sfake.NewClientset(secret)
-
-	hdr := map[string]string{
-		"Content-Type": "application/json",
-	}
-	from := map[string]mdaiv1.ValueFromSource{
-		"Authorization": {
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "header-secret"},
-				Key:                  "token",
+		{
+			name:    "Secret not found (error)",
+			preload: nil,
+			ns:      "test-ns",
+			from: map[string]mdaiv1.ValueFromSource{
+				"Authorization": {
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "api-token-secret"},
+						Key:                  "token",
+					},
+				},
+			},
+			wantErrSubstrings: []string{
+				`headersFrom[Authorization] secret: read secret "api-token-secret"`,
+				"not found",
+			},
+		},
+		{
+			name:    "ConfigMap not found (error)",
+			preload: nil,
+			ns:      "test-ns",
+			from: map[string]mdaiv1.ValueFromSource{
+				"X-Api-Key": {
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "missing-cm"},
+						Key:                  "api-key",
+					},
+				},
+			},
+			wantErrSubstrings: []string{
+				`headersFrom[X-Api-Key] configmap: read configmap "missing-cm"`,
+				`configmaps "missing-cm" not found`,
 			},
 		},
 	}
 
-	expected := http.Header{}
-	expected.Set("Content-Type", "application/json")
-	expected.Set("Authorization", "my-secret-token")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	actual, err := resolveAllHeaders(context.Background(), kube, ns, hdr, from)
+			kube := k8sfake.NewClientset(tt.preload...)
+			got, err := resolveAllHeaders(context.Background(), kube, tt.ns, tt.baseHeaders, tt.from)
 
-	require.NoError(t, err)
-	assert.Equal(t, expected, actual)
+			if len(tt.wantErrSubstrings) > 0 {
+				require.Error(t, err)
+				for _, sub := range tt.wantErrSubstrings {
+					assert.Contains(t, err.Error(), sub)
+				}
+				assert.Nil(t, got)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
-func TestResolveAllHeaders_FromConfigMap(t *testing.T) {
+func TestResolveAllTemplateValues(t *testing.T) {
 	t.Parallel()
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "header-cm", Namespace: "ns1"},
-		Data:       map[string]string{"auth-token": "my-secret-token"},
-	}
-	kube := k8sfake.NewClientset(cm)
-
-	hdr := map[string]string{
-		"x-request-id": "abc-123",
-	}
-	from := map[string]mdaiv1.ValueFromSource{
-		"Authorization": {
-			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "header-cm"},
-				Key:                  "auth-token",
+	tests := []struct {
+		name              string
+		preload           []runtime.Object
+		ns                string
+		values            map[string]string
+		from              map[string]mdaiv1.ValueFromSource
+		want              map[string]string
+		wantErrSubstrings []string
+	}{
+		{
+			name:    "Secret not found (error)",
+			preload: nil,
+			ns:      "test-ns",
+			values:  map[string]string{"foo": "bar"},
+			from: map[string]mdaiv1.ValueFromSource{
+				"mykey": {
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "no-such-secret"},
+						Key:                  "somekey",
+					},
+				},
+			},
+			wantErrSubstrings: []string{
+				`templateValuesFrom[mykey] secret: read secret "no-such-secret"`,
+				"not found",
+			},
+		},
+		{
+			name:    "ConfigMap not found (error)",
+			preload: nil,
+			ns:      "test-ns",
+			from: map[string]mdaiv1.ValueFromSource{
+				"my-key": {
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "non-existent-cm"},
+						Key:                  "some-key",
+					},
+				},
+			},
+			wantErrSubstrings: []string{
+				`templateValuesFrom[my-key] configmap: read configmap "non-existent-cm"`,
+				`not found`,
 			},
 		},
 	}
 
-	actual, err := resolveAllHeaders(context.Background(), kube, "ns1", hdr, from)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	expected := http.Header{}
-	expected.Set("Authorization", "my-secret-token")
-	expected.Set("X-Request-Id", "abc-123")
+			kube := k8sfake.NewClientset(tt.preload...)
+			got, err := resolveAllTemplateValues(context.Background(), kube, tt.ns, tt.values, tt.from)
 
-	assert.Equal(t, expected, actual)
-}
+			if len(tt.wantErrSubstrings) > 0 {
+				require.Error(t, err)
+				for _, sub := range tt.wantErrSubstrings {
+					assert.Contains(t, err.Error(), sub)
+				}
+				require.Nil(t, got)
+				return
+			}
 
-func TestResolveAllHeaders_SecretNotFound(t *testing.T) {
-	t.Parallel()
-
-	kube := k8sfake.NewClientset()
-	ns := "test-ns"
-
-	from := map[string]mdaiv1.ValueFromSource{
-		"Authorization": {
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "api-token-secret"},
-				Key:                  "token",
-			},
-		},
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
 	}
-
-	// Secret "api-token-secret" does not exist in the fake clientset
-	headers, err := resolveAllHeaders(context.Background(), kube, ns, nil, from)
-
-	require.Error(t, err)
-	assert.Nil(t, headers)
-	assert.Contains(t, err.Error(), `headersFrom[Authorization] secret: read secret "api-token-secret"`)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestResolveAllHeaders_ConfigMapNotFound(t *testing.T) {
-	t.Parallel()
-
-	kube := k8sfake.NewClientset() // No objects, so CM won't be found
-	ns := "test-ns"
-	ctx := context.Background()
-
-	from := map[string]mdaiv1.ValueFromSource{
-		"X-Api-Key": {
-			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "missing-cm"},
-				Key:                  "api-key",
-			},
-		},
-	}
-
-	headers, err := resolveAllHeaders(ctx, kube, ns, nil, from)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `headersFrom[X-Api-Key] configmap: read configmap "missing-cm"`)
-	assert.Contains(t, err.Error(), `configmaps "missing-cm" not found`)
-	assert.Nil(t, headers)
-}
-
-func TestResolveAllTemplateValues_SecretNotFound(t *testing.T) {
-	t.Parallel()
-
-	kube := k8sfake.NewClientset()
-	ns := "test-ns"
-	vals := map[string]string{"foo": "bar"}
-	from := map[string]mdaiv1.ValueFromSource{
-		"mykey": {
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "no-such-secret"},
-				Key:                  "somekey",
-			},
-		},
-	}
-
-	out, err := resolveAllTemplateValues(context.Background(), kube, ns, vals, from)
-	require.Error(t, err)
-	require.Nil(t, out)
-	assert.Contains(t, err.Error(), `templateValuesFrom[mykey] secret: read secret "no-such-secret"`)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestResolveAllTemplateValues_ConfigMapNotFound(t *testing.T) {
-	t.Parallel()
-
-	kube := k8sfake.NewClientset() // No objects, so CM will not be found
-	ns := "test-ns"
-	ctx := context.Background()
-
-	from := map[string]mdaiv1.ValueFromSource{
-		"my-key": {
-			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "non-existent-cm"},
-				Key:                  "some-key",
-			},
-		},
-	}
-
-	vals, err := resolveAllTemplateValues(ctx, kube, ns, nil, from)
-
-	require.Error(t, err)
-	require.Nil(t, vals)
-	assert.Contains(t, err.Error(), `templateValuesFrom[my-key] configmap: read configmap "non-existent-cm"`)
-	assert.Contains(t, err.Error(), `not found`)
 }
