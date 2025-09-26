@@ -701,3 +701,165 @@ func TestReadConfigMapKey_DataBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "v", v) // TrimSpace applied
 }
+
+func TestResolveAllHeaders_FromSecret(t *testing.T) {
+	t.Parallel()
+
+	ns := "test-ns"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "header-secret",
+			Namespace: ns,
+		},
+		Data: map[string][]byte{
+			"token": []byte("my-secret-token"),
+		},
+	}
+	kube := k8sfake.NewClientset(secret)
+
+	hdr := map[string]string{
+		"Content-Type": "application/json",
+	}
+	from := map[string]mdaiv1.ValueFromSource{
+		"Authorization": {
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "header-secret"},
+				Key:                  "token",
+			},
+		},
+	}
+
+	expected := http.Header{}
+	expected.Set("Content-Type", "application/json")
+	expected.Set("Authorization", "my-secret-token")
+
+	actual, err := resolveAllHeaders(context.Background(), kube, ns, hdr, from)
+
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
+func TestResolveAllHeaders_FromConfigMap(t *testing.T) {
+	t.Parallel()
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "header-cm", Namespace: "ns1"},
+		Data:       map[string]string{"auth-token": "my-secret-token"},
+	}
+	kube := k8sfake.NewClientset(cm)
+
+	hdr := map[string]string{
+		"x-request-id": "abc-123",
+	}
+	from := map[string]mdaiv1.ValueFromSource{
+		"Authorization": {
+			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "header-cm"},
+				Key:                  "auth-token",
+			},
+		},
+	}
+
+	actual, err := resolveAllHeaders(context.Background(), kube, "ns1", hdr, from)
+	require.NoError(t, err)
+
+	expected := http.Header{}
+	expected.Set("Authorization", "my-secret-token")
+	expected.Set("X-Request-Id", "abc-123")
+
+	assert.Equal(t, expected, actual)
+}
+
+func TestResolveAllHeaders_SecretNotFound(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset()
+	ns := "test-ns"
+
+	from := map[string]mdaiv1.ValueFromSource{
+		"Authorization": {
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "api-token-secret"},
+				Key:                  "token",
+			},
+		},
+	}
+
+	// Secret "api-token-secret" does not exist in the fake clientset
+	headers, err := resolveAllHeaders(context.Background(), kube, ns, nil, from)
+
+	require.Error(t, err)
+	assert.Nil(t, headers)
+	assert.Contains(t, err.Error(), `headersFrom[Authorization] secret: read secret "api-token-secret"`)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestResolveAllHeaders_ConfigMapNotFound(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset() // No objects, so CM won't be found
+	ns := "test-ns"
+	ctx := context.Background()
+
+	from := map[string]mdaiv1.ValueFromSource{
+		"X-Api-Key": {
+			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "missing-cm"},
+				Key:                  "api-key",
+			},
+		},
+	}
+
+	headers, err := resolveAllHeaders(ctx, kube, ns, nil, from)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `headersFrom[X-Api-Key] configmap: read configmap "missing-cm"`)
+	assert.Contains(t, err.Error(), `configmaps "missing-cm" not found`)
+	assert.Nil(t, headers)
+}
+
+func TestResolveAllTemplateValues_SecretNotFound(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset()
+	ns := "test-ns"
+	vals := map[string]string{"foo": "bar"}
+	from := map[string]mdaiv1.ValueFromSource{
+		"mykey": {
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "no-such-secret"},
+				Key:                  "somekey",
+			},
+		},
+	}
+
+	out, err := resolveAllTemplateValues(context.Background(), kube, ns, vals, from)
+	require.Error(t, err)
+	require.Nil(t, out)
+	assert.Contains(t, err.Error(), `templateValuesFrom[mykey] secret: read secret "no-such-secret"`)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestResolveAllTemplateValues_ConfigMapNotFound(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset() // No objects, so CM will not be found
+	ns := "test-ns"
+	ctx := context.Background()
+
+	from := map[string]mdaiv1.ValueFromSource{
+		"my-key": {
+			ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "non-existent-cm"},
+				Key:                  "some-key",
+			},
+		},
+	}
+
+	vals, err := resolveAllTemplateValues(ctx, kube, ns, nil, from)
+
+	require.Error(t, err)
+	require.Nil(t, vals)
+	assert.Contains(t, err.Error(), `templateValuesFrom[my-key] configmap: read configmap "non-existent-cm"`)
+	assert.Contains(t, err.Error(), `not found`)
+}
