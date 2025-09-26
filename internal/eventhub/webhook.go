@@ -6,23 +6,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
+	"github.com/decisiveai/mdai-data-core/interpolation"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
+const maxResponseBodySize = 4096
+
 type SlackPayload struct {
 	Text   string           `json:"text"`
 	Blocks []map[string]any `json:"blocks,omitempty"`
 }
 
-func HandleCallSlackWebhookFn(ctx context.Context, kube kubernetes.Interface, namespace string, event eventing.MdaiEvent, raw json.RawMessage, payloadData map[string]any) error {
+func (h *EventHub) HandleCallWebhookFn(ctx context.Context, kube kubernetes.Interface, namespace string, event eventing.MdaiEvent, raw json.RawMessage, payloadData map[string]any) error {
 	var in mdaiv1.CallWebhookAction
 	if err := DecodeInputs(raw, &in); err != nil {
 		return fmt.Errorf("decode call.webhook: %w", err)
@@ -32,6 +37,7 @@ func HandleCallSlackWebhookFn(ctx context.Context, kube kubernetes.Interface, na
 	if err != nil {
 		return fmt.Errorf("resolve webhook url: %w", err)
 	}
+
 	if webhookURL == "" {
 		return errors.New("webhook_url must be a non-empty string")
 	}
@@ -39,21 +45,47 @@ func HandleCallSlackWebhookFn(ctx context.Context, kube kubernetes.Interface, na
 		return fmt.Errorf("invalid webhook url: %w", err)
 	}
 
-	payload, err := buildSlackPayload(in.TemplateValues, event, payloadData)
+	callCtx := ctx
+	cancel := func() {}
+	if in.Timeout != nil && in.Timeout.Duration > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, in.Timeout.Duration)
+	}
+	defer cancel()
+
+	// resolve template values (from config map or secret plus literals; literals override)
+	templateValues, err := resolveAllTemplateValues(callCtx, kube, namespace, in.TemplateValues, in.TemplateValuesFrom)
 	if err != nil {
 		return err
 	}
 
-	payloadBytes, err := json.Marshal(payload)
+	// interpolate template values with event as source before injecting into the payload
+	h.InterpolationEngine.InterpolateMapWithSources(templateValues, &interpolation.TriggerSource{Event: &event})
+
+	body, err := h.buildPayload(callCtx, kube, namespace, in, event, payloadData, templateValues)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewBuffer(payloadBytes))
+	// we do not support interpolation for headers
+	headers, err := resolveAllHeaders(callCtx, kube, namespace, in.Headers, in.HeadersFrom)
+	if err != nil {
+		return err
+	}
+
+	return sendWebhookRequest(callCtx, webhookURL, body, headers)
+}
+
+func sendWebhookRequest(ctx context.Context, webhookURL string, body []byte, headers http.Header) error {
+	// Ensure Content-Type if we have a body and caller didn't set it
+	if len(body) > 0 && headers.Get("Content-Type") == "" {
+		headers.Set("Content-Type", "application/json")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header = headers
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -63,11 +95,101 @@ func HandleCallSlackWebhookFn(ctx context.Context, kube kubernetes.Interface, na
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("non-200 response: %s", resp.Status)
+	// Accept any 2xx (e.g., GitHub dispatch returns 204)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+		return fmt.Errorf("non-2xx response: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 
 	return nil
+}
+
+func resolveAllHeaders(
+	ctx context.Context,
+	kube kubernetes.Interface,
+	ns string,
+	hdr map[string]string,
+	from map[string]mdaiv1.ValueFromSource,
+) (http.Header, error) {
+	out := make(http.Header, len(hdr)+len(from))
+
+	// 1) Secret/ConfigMap-backed headers
+	for k, src := range from {
+		key := textproto.CanonicalMIMEHeaderKey(k)
+		switch {
+		case src.SecretKeyRef != nil:
+			v, err := readSecretKey(ctx, kube, ns, *src.SecretKeyRef)
+			if err != nil {
+				return nil, fmt.Errorf("headersFrom[%s] secret: %w", k, err)
+			}
+			out.Set(key, v)
+		case src.ConfigMapKeyRef != nil:
+			v, err := readConfigMapKey(ctx, kube, ns, *src.ConfigMapKeyRef)
+			if err != nil {
+				return nil, fmt.Errorf("headersFrom[%s] configmap: %w", k, err)
+			}
+			out.Set(key, v)
+		default:
+			// already enforced by CRD/webhook
+		}
+	}
+
+	for k, v := range hdr {
+		key := textproto.CanonicalMIMEHeaderKey(k)
+		out.Set(key, v)
+	}
+
+	return out, nil
+}
+
+func (h *EventHub) buildPayload(
+	ctx context.Context,
+	kube kubernetes.Interface,
+	ns string,
+	in mdaiv1.CallWebhookAction,
+	event eventing.MdaiEvent,
+	payloadData map[string]any,
+	templateValues map[string]string,
+) ([]byte, error) {
+	switch in.TemplateRef {
+	case mdaiv1.TemplateRefSlack:
+		return buildSlackPayloadAndMarshal(templateValues, event, payloadData)
+	case mdaiv1.TemplateRefJSON:
+		return h.buildJSONTemplatePayload(ctx, kube, ns, in, event, templateValues)
+	default:
+		return nil, fmt.Errorf("marshal payload: unknown template reference: %q", in.TemplateRef)
+	}
+}
+
+func buildSlackPayloadAndMarshal(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) ([]byte, error) {
+	payload, err := buildSlackPayload(args, event, payloadData)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal slack payload: %w", err)
+	}
+	return b, nil
+}
+
+func (h *EventHub) buildJSONTemplatePayload(ctx context.Context, kube kubernetes.Interface, ns string, in mdaiv1.CallWebhookAction, event eventing.MdaiEvent, templateValues map[string]string) ([]byte, error) {
+	if in.PayloadTemplate == nil {
+		return nil, errors.New("payloadTemplate must be provided")
+	}
+	rawTemplate, err := resolveStringOrFrom(ctx, kube, ns, *in.PayloadTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("resolve payloadTemplate: %w", err)
+	}
+
+	// ${template:*} && ${trigger:*}
+	rawTemplate = h.InterpolationEngine.InterpolateWithSources(rawTemplate, interpolation.TemplateSource{Values: templateValues}, &interpolation.TriggerSource{Event: &event})
+
+	b := []byte(rawTemplate)
+	if !json.Valid(b) {
+		return nil, errors.New("payloadTemplate is not valid JSON")
+	}
+	return []byte(rawTemplate), nil
 }
 
 func buildSlackPayload(args map[string]string, event eventing.MdaiEvent, payloadData map[string]any) (SlackPayload, error) {
@@ -249,4 +371,30 @@ func readConfigMapKey(ctx context.Context, kube kubernetes.Interface, ns string,
 		return strings.TrimSpace(string(binaryData)), nil
 	}
 	return "", fmt.Errorf("configmap %q missing key %q", ref.Name, ref.Key)
+}
+
+func resolveAllTemplateValues(ctx context.Context, kube kubernetes.Interface, ns string, vals map[string]string, from map[string]mdaiv1.ValueFromSource) (map[string]string, error) {
+	out := make(map[string]string, len(vals)+len(from))
+	for k, src := range from {
+		switch {
+		case src.SecretKeyRef != nil:
+			v, err := readSecretKey(ctx, kube, ns, *src.SecretKeyRef)
+			if err != nil {
+				return nil, fmt.Errorf("templateValuesFrom[%s] secret: %w", k, err)
+			}
+			out[k] = v
+		case src.ConfigMapKeyRef != nil:
+			v, err := readConfigMapKey(ctx, kube, ns, *src.ConfigMapKeyRef)
+			if err != nil {
+				return nil, fmt.Errorf("templateValuesFrom[%s] configmap: %w", k, err)
+			}
+			out[k] = v
+		default:
+			return nil, fmt.Errorf("templateValuesFrom[%s]: no source", k)
+		}
+	}
+	for k, v := range vals {
+		out[k] = v
+	}
+	return out, nil
 }

@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
+	"github.com/decisiveai/mdai-data-core/interpolation"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
@@ -182,13 +184,18 @@ func TestHandleCallSlackWebhook_Success_WithLiteralURL(t *testing.T) {
 	// Minimal, valid inputs JSON for CallWebhookAction with direct URL value
 	raw := json.RawMessage(`{
 		"url": {"value": "` + srv.URL + `"},
+		"templateRef": "slackAlertTemplate",
 		"templateValues": {"message":"hello"}
 	}`)
 
 	ev := eventing.MdaiEvent{HubName: "h", Name: "n"}
 	payload := map[string]any{"status": "ok", "labels": map[string]any{}}
 
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 	require.NoError(t, handlerErr)
 	require.Equal(t, http.MethodPost, gotMethod)
@@ -212,12 +219,17 @@ func TestHandleCallSlackWebhook_Success_WithSecretRef(t *testing.T) {
 
 	raw := json.RawMessage(`{
 		"url": {"valueFrom":{"secretKeyRef":{"name":"slack-webhook-secret","key":"url"}}},
+		"templateRef": "slackAlertTemplate",
 		"templateValues": {"message":"ok"}
 	}`)
 	ev := eventing.MdaiEvent{}
 	payload := map[string]any{"status": "ok", "labels": map[string]any{}}
 
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 }
 
@@ -237,12 +249,17 @@ func TestHandleCallSlackWebhook_Success_WithConfigMapBinaryData(t *testing.T) {
 
 	raw := json.RawMessage(`{
 		"url": {"valueFrom":{"configMapKeyRef":{"name":"cfg","key":"hook"}}},
+		"templateRef": "slackAlertTemplate",
 		"templateValues": {"message":"ok"}
 	}`)
 	ev := eventing.MdaiEvent{}
 	payload := map[string]any{"status": "ok", "labels": map[string]any{}}
 
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 }
 
@@ -255,13 +272,17 @@ func TestHandleCallSlackWebhook_Non200_IsError(t *testing.T) {
 	defer srv.Close()
 
 	kube := k8sfake.NewClientset()
-	raw := json.RawMessage(`{"url":{"value":"` + srv.URL + `"},"templateValues":{}}`)
+	raw := json.RawMessage(`{"url":{"value":"` + srv.URL + `"},"templateValues":{}, "templateRef":"slackAlertTemplate"}`)
 	ev := eventing.MdaiEvent{}
 	payload := map[string]any{"status": "ok", "labels": map[string]any{}}
 
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "non-200 response: 500")
+	require.Contains(t, err.Error(), "non-2xx response: 500")
 }
 
 func TestHandleCallSlackWebhook_InvalidOrEmptyURL(t *testing.T) {
@@ -273,13 +294,17 @@ func TestHandleCallSlackWebhook_InvalidOrEmptyURL(t *testing.T) {
 
 	// Empty
 	rawEmpty := json.RawMessage(`{"url":{"value":""},"templateValues":{}}`)
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, rawEmpty, payload)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, rawEmpty, payload)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "webhook_url must be a non-empty string")
 
 	// Invalid format
 	rawBad := json.RawMessage(`{"url":{"value":"::not-a-url"},"templateValues":{}}`)
-	err = HandleCallSlackWebhookFn(context.Background(), kube, "ns1", ev, rawBad, payload)
+	err = h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, rawBad, payload)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid webhook url")
 }
@@ -291,13 +316,17 @@ func TestHandleCallSlackWebhook_DecodeError_And_BuildPayloadError(t *testing.T) 
 
 	// Malformed inputs JSON → decode error
 	rawBadJSON := json.RawMessage(`{"url":{"value":"http://example.com"}`)
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns1", eventing.MdaiEvent{}, rawBadJSON, nil)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", eventing.MdaiEvent{}, rawBadJSON, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "decode call.webhook:")
 
 	// Missing "status" in payload → buildSlackPayload error via addPayloadFieldByKey
-	rawOK := json.RawMessage(`{"url":{"value":"http://example.com"},"templateValues":{}}`)
-	err = HandleCallSlackWebhookFn(context.Background(), kube, "ns1", eventing.MdaiEvent{}, rawOK, map[string]any{
+	rawOK := json.RawMessage(`{"url":{"value":"http://example.com"},"templateValues":{}, "templateRef":"slackAlertTemplate"}`)
+	err = h.HandleCallWebhookFn(context.Background(), kube, "ns1", eventing.MdaiEvent{}, rawOK, map[string]any{
 		"labels": map[string]any{},
 		// "status" omitted
 	})
@@ -428,9 +457,11 @@ func TestHandleCallSlackWebhook_PropagatesHTTPDoError(t *testing.T) {
 	// Use an un-routable URL to force http.Do error (quickly)
 	badURL := "http://127.0.0.1:1"
 	kube := k8sfake.NewClientset()
-	raw := json.RawMessage(`{"url":{"value":"` + badURL + `"},"templateValues":{}}`)
 
-	err := HandleCallSlackWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+	raw := json.RawMessage(`{"url":{"value":"` + badURL + `"},"templateValues":{},"templateRef":"jsonTemplate","payloadTemplate":{"value":"{\"ref\":\"${template:ref:-main}\",\"inputs\":{\"env\":\"${template:env:-prod}\",\"build_id\":\"${trigger:id}\"}}"}}`)
+
+	h := &EventHub{Logger: zap.NewNop(), InterpolationEngine: interpolation.NewEngine(zap.NewNop())}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
 		"status": "ok",
 		"labels": map[string]any{},
 	})
@@ -453,4 +484,220 @@ func TestReadSecretKeyAndConfigMapKey_NotFound(t *testing.T) {
 		Key:                  "k",
 	})
 	require.Error(t, err)
+}
+
+func TestHandleCallSlackWebhook_JSONTemplate_Success_CanonicalizesAndInterpolates(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotBody    map[string]any
+		handlerErr error
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			handlerErr = err
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		if err := json.Unmarshal(b, &gotBody); err != nil {
+			handlerErr = err
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	kube := k8sfake.NewClientset()
+
+	// payloadTemplate.value is a JSON *string* per StringOrFrom; it contains template+trigger vars.
+	raw := json.RawMessage(`{
+		"url": {"value": "` + srv.URL + `"},
+		"templateRef": "jsonTemplate",
+		"templateValues": {"env": "stage", "ref": "feature-x"},
+		"payloadTemplate": {"value": "{\"inputs\":{\"env\":\"${template:env:-prod}\",\"build_id\":\"${trigger:id}\"},\"ref\":\"${template:ref:-main}\"}"}
+	}`)
+
+	ev := eventing.MdaiEvent{ID: "abc-123"}
+	payload := map[string]any{"status": "ok", "labels": map[string]any{}}
+
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	require.NoError(t, h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload))
+	require.NoError(t, handlerErr, "handler should not hit decode errors")
+
+	// Server saw canonical JSON (order/spacing irrelevant). Validate semantics.
+	want := map[string]any{
+		"ref": "feature-x", // template value overrides default
+		"inputs": map[string]any{
+			"env":      "stage",   // from templateValues
+			"build_id": "abc-123", // from trigger
+		},
+	}
+	assert.Equal(t, want, gotBody)
+}
+
+func TestHandleCallSlackWebhook_JSONTemplate_InvalidJSON_AfterInterpolation(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset()
+	// After interpolation this is still invalid JSON (missing closing brace).
+	raw := json.RawMessage(`{
+		"url": {"value": "http://127.0.0.1:1"},
+		"templateRef": "jsonTemplate",
+		"templateValues": {},
+		"payloadTemplate": {"value":"{\"inputs\":{\"env\":\"${template:env:-prod}\"}"}
+	}`)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+		"status": "ok", "labels": map[string]any{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "payloadTemplate is not valid JSON")
+}
+
+func TestHandleCallSlackWebhook_UnknownTemplateRef_ErrorWrap(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset()
+	raw := json.RawMessage(`{
+		"url":{"value":"http://example.com"},
+		"templateValues":{},
+		"templateRef":"unknownThing"
+	}`)
+	h := &EventHub{Logger: zap.NewNop()}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+		"status": "ok", "labels": map[string]any{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unknown template reference: "unknownThing"`)
+}
+
+func TestHandleCallSlackWebhook_Timeout_UsesCallCtx(t *testing.T) {
+	t.Parallel()
+
+	// Server that sleeps long enough to exceed our timeout
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	kube := k8sfake.NewClientset()
+
+	raw := json.RawMessage(`{
+		"url":{"value":"` + srv.URL + `"},
+		"templateRef":"slackAlertTemplate",
+		"templateValues":{"message":"hi"},
+		"timeout":"50ms"
+	}`)
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
+	}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+		"status": "ok", "labels": map[string]any{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to send request")
+	require.Contains(t, err.Error(), "context deadline exceeded")
+}
+
+func TestHandleCallSlackWebhook_JSONTemplate_RequiresPayloadTemplate(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset()
+	raw := json.RawMessage(`{
+		"url":{"value":"http://example.com"},
+		"templateRef":"jsonTemplate",
+		"templateValues":{}
+	}`)
+	h := &EventHub{Logger: zap.NewNop(), InterpolationEngine: interpolation.NewEngine(zap.NewNop())}
+	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+		"status": "ok", "labels": map[string]any{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "payloadTemplate must be provided")
+}
+
+func TestBuildSlackPayload_LabelReadError(t *testing.T) {
+	t.Parallel()
+
+	// Force addPayloadFieldByKeyFromLabels to run and fail by making labels invalid type
+	args := map[string]string{"labels_val_ref_primary": "whatever"}
+	ev := eventing.MdaiEvent{}
+	payload := map[string]any{
+		"status": "ok",
+		"labels": "oops-not-a-map",
+	}
+	_, err := buildSlackPayload(args, ev, payload)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to read labels")
+}
+
+func TestResolveAllTemplateValues_MixAndOverride(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "sec", Namespace: "ns"},
+			Data: map[string][]byte{
+				"token": []byte(" from-secret "),
+			},
+		},
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns"},
+			Data: map[string]string{
+				"ref": "from-cm",
+			},
+		},
+	)
+
+	vals := map[string]string{
+		"token": "literal-wins", // should override secret
+		"extra": "lit",
+	}
+	from := map[string]mdaiv1.ValueFromSource{
+		"token": {SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "sec"},
+			Key:                  "token",
+		}},
+		"ref": {ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "cm"},
+			Key:                  "ref",
+		}},
+	}
+
+	got, err := resolveAllTemplateValues(context.Background(), kube, "ns", vals, from)
+	require.NoError(t, err)
+
+	// Expect trimmed secret, cm value, and literal override
+	require.Equal(t, "literal-wins", got["token"]) // literal overrides
+	require.Equal(t, "from-cm", got["ref"])
+	require.Equal(t, "lit", got["extra"])
+}
+
+func TestReadConfigMapKey_DataBranch(t *testing.T) {
+	t.Parallel()
+
+	kube := k8sfake.NewClientset(
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: "ns"},
+			Data:       map[string]string{"k": "  v  "},
+		},
+	)
+	v, err := readConfigMapKey(context.Background(), kube, "ns", corev1.ConfigMapKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"},
+		Key:                  "k",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "v", v) // TrimSpace applied
 }

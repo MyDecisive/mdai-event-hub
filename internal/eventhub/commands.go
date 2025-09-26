@@ -58,7 +58,7 @@ func (h *EventHub) interpolate(tmpl, opName, what string, event eventing.MdaiEve
 	if h.InterpolationEngine == nil {
 		return "", fmt.Errorf("%s: interpolate %s: interpolation engine is not configured", opName, what)
 	}
-	value := h.InterpolationEngine.Interpolate(tmpl, &event)
+	value := h.InterpolationEngine.Interpolate(tmpl, &event) // TODO update to the new api and use everywhere instead of direct calls
 	if strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("%s: interpolate %s produced empty (template=%q)", opName, what, tmpl)
 	}
@@ -183,7 +183,7 @@ func (h *EventHub) execVarScalarOp(
 }
 
 func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
-	return HandleCallSlackWebhookFn(ctx, h.Kube, ns, ev, cmd.Inputs, payload)
+	return h.HandleCallWebhookFn(ctx, h.Kube, ns, ev, cmd.Inputs, payload)
 }
 
 func DecodeInputs[T any](raw json.RawMessage, out *T) error {
