@@ -101,6 +101,7 @@ func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInv
 		rules := matchedRules(event.Name, getRulesMap(logger, automationConfig.Data))
 		if len(rules) == 0 {
 			logger.Warn("No configured automation for event, skipping")
+			// TODO add audit event
 			return nil
 		}
 
