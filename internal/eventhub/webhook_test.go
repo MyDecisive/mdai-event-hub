@@ -196,7 +196,7 @@ func TestHandleCallSlackWebhook_Success_WithLiteralURL(t *testing.T) {
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 	require.NoError(t, handlerErr)
 	require.Equal(t, http.MethodPost, gotMethod)
@@ -230,7 +230,7 @@ func TestHandleCallSlackWebhook_Success_WithSecretRef(t *testing.T) {
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 }
 
@@ -260,7 +260,7 @@ func TestHandleCallSlackWebhook_Success_WithConfigMapBinaryData(t *testing.T) {
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns1", ev, raw, payload)
 	require.NoError(t, err)
 }
 
@@ -281,7 +281,7 @@ func TestHandleCallSlackWebhook_Non200_IsError(t *testing.T) {
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload)
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns1", ev, raw, payload)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "non-2xx response: 500")
 }
@@ -462,7 +462,7 @@ func TestHandleCallSlackWebhook_PropagatesHTTPDoError(t *testing.T) {
 	raw := json.RawMessage(`{"url":{"value":"` + badURL + `"},"templateValues":{},"templateRef":"jsonTemplate","payloadTemplate":{"value":"{\"ref\":\"${template:ref:-main}\",\"inputs\":{\"env\":\"${template:env:-prod}\",\"build_id\":\"${trigger:id}\"}}"}}`)
 
 	h := &EventHub{Logger: zap.NewNop(), InterpolationEngine: interpolation.NewEngine(zap.NewNop())}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
 		"status": "ok",
 		"labels": map[string]any{},
 	})
@@ -529,7 +529,7 @@ func TestHandleCallSlackWebhook_JSONTemplate_Success_CanonicalizesAndInterpolate
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	require.NoError(t, h.HandleCallWebhookFn(context.Background(), kube, "ns1", ev, raw, payload))
+	require.NoError(t, h.HandleCallWebhookFn(t.Context(), kube, "ns1", ev, raw, payload))
 	require.NoError(t, handlerErr, "handler should not hit decode errors")
 
 	// Server saw canonical JSON (order/spacing irrelevant). Validate semantics.
@@ -604,7 +604,7 @@ func TestHandleCallSlackWebhook_Timeout_UsesCallCtx(t *testing.T) {
 		Logger:              zap.NewNop(),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
-	err := h.HandleCallWebhookFn(context.Background(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
+	err := h.HandleCallWebhookFn(t.Context(), kube, "ns", eventing.MdaiEvent{}, raw, map[string]any{
 		"status": "ok", "labels": map[string]any{},
 	})
 	require.Error(t, err)
