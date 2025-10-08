@@ -11,12 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type VarDeps struct {
-	Logger         *zap.Logger
-	HandlerAdapter iHandlerAdapter
-}
-
-type iHandlerAdapter interface {
+type HandlerAdapter interface {
 	AddElementToSet(ctx context.Context, variableKey, hubName, value, correlationID string) error
 	RemoveElementFromSet(ctx context.Context, variableKey, hubName, value, correlationID string) error
 	SetMapEntry(ctx context.Context, variableKey, hubName, field, value, correlationID string) error
@@ -24,112 +19,146 @@ type iHandlerAdapter interface {
 	SetStringValue(ctx context.Context, variableKey, hubName, value, correlationID string) error
 }
 
-func (v *VarDeps) HandleManualVariablesActions(ctx context.Context, event eventing.MdaiEvent) error {
+type VarDeps struct {
+	Logger         *zap.Logger
+	HandlerAdapter HandlerAdapter
+}
+
+type setInputs struct {
+	Set   string `json:"set"`
+	Value string `json:"value"`
+}
+
+type scalarInputs struct {
+	Scalar string `json:"scalar"`
+	Value  string `json:"value"`
+}
+
+type mapAddInputs struct {
+	Map   string `json:"map"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type mapRemoveInputs struct {
+	Map string `json:"map"`
+	Key string `json:"key"`
+}
+
+// BuildCommandFromEvent creates a rule.Command from a manual variable update event.
+func (v *VarDeps) BuildCommandFromEvent(event eventing.MdaiEvent) ([]rule.Command, error) {
 	var payloadObj eventing.ManualVariablesActionPayload
 	if err := json.Unmarshal([]byte(event.Payload), &payloadObj); err != nil {
-		return err
+		return nil, fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
 
-	v.Logger.Info("Received static variable payload", zap.Reflect("value", payloadObj.Data))
-	correlationID := event.CorrelationID
+	v.Logger.Info("Building command from manual variable payload", zap.Reflect("value", payloadObj.Data))
 
-	var cmd rule.CommandType
-	var err error
-	if payloadObj.DataType == "string" || payloadObj.DataType == "int" || payloadObj.DataType == "boolean" {
-		cmd = rule.CmdVarScalarUpdate
-	} else {
-		if cmd, err = rule.ParseCommandType("variable" + "." + payloadObj.DataType + "." + payloadObj.Operation); err != nil {
-			return err
-		}
+	cmdType, err := determineCommandType(payloadObj.DataType, payloadObj.Operation)
+	if err != nil {
+		return nil, err
 	}
 
-	switch cmd {
-	case rule.CmdVarSetAdd:
-		return v.processSetValues(ctx, payloadObj, event.HubName, correlationID, v.HandlerAdapter.AddElementToSet, "Setting value")
-	case rule.CmdVarSetRemove:
-		return v.processSetValues(ctx, payloadObj, event.HubName, correlationID, v.HandlerAdapter.RemoveElementFromSet, "Removing value")
-	case rule.CmdVarMapAdd:
-		return v.handleMapAdd(ctx, payloadObj, event.HubName, correlationID)
-	case rule.CmdVarMapRemove:
-		return v.handleMapRemove(ctx, payloadObj, event.HubName, correlationID)
+	switch cmdType {
+	case rule.CmdVarSetAdd, rule.CmdVarSetRemove:
+		return buildSetCommands(cmdType, payloadObj)
 	case rule.CmdVarScalarUpdate:
-		value, ok := payloadObj.Data.(string)
-		if !ok {
-			return errors.New("data should be a string")
-		}
-		return v.HandlerAdapter.SetStringValue(ctx, payloadObj.VariableRef, event.HubName, value, correlationID)
+		return buildScalarCommand(cmdType, payloadObj)
+	case rule.CmdVarMapAdd:
+		return buildMapAddCommands(cmdType, payloadObj)
+	case rule.CmdVarMapRemove:
+		return buildMapRemoveCommands(cmdType, payloadObj)
 	case rule.CmdWebhookCall:
-		return fmt.Errorf("unsupported command: %s", cmd.String())
+		return nil, nil // No commands to build for webhook call in this context
 	default:
-		return fmt.Errorf("unsupported data type: %s", payloadObj.DataType)
+		return nil, fmt.Errorf("unsupported command type for manual action: %s", cmdType)
 	}
 }
 
-type SetOperation func(ctx context.Context, variableKey, hubName, value, correlationID string) error
-
-func (v *VarDeps) processSetValues(
-	ctx context.Context,
-	payloadObj eventing.ManualVariablesActionPayload,
-	hubName,
-	correlationID string,
-	operation SetOperation,
-	logMessage string,
-) error {
-	values, ok := payloadObj.Data.([]any)
-	if !ok {
-		return errors.New("data should be a list of strings")
+func buildSetCommands(cmdType rule.CommandType, payload eventing.ManualVariablesActionPayload) ([]rule.Command, error) {
+	rawValues, ok := payload.Data.([]any)
+	if !ok || len(rawValues) == 0 {
+		return nil, errors.New("data for set operation should be a non-empty array")
 	}
 
-	for _, val := range values {
-		str, ok := val.(string)
+	var commands []rule.Command
+	for _, item := range rawValues {
+		value, ok := item.(string)
 		if !ok {
-			return fmt.Errorf("expected string, got %T", val)
+			return nil, errors.New("set value must be a string")
 		}
-
-		v.Logger.Info(logMessage, zap.String("value", str))
-		if err := operation(ctx, payloadObj.VariableRef, hubName, str, correlationID); err != nil {
-			return err
+		inputs, err := json.Marshal(setInputs{Set: payload.VariableRef, Value: value})
+		if err != nil {
+			return nil, fmt.Errorf("failed to build command inputs for set: %w", err)
 		}
+		commands = append(commands, rule.Command{Type: cmdType, Inputs: inputs})
 	}
-	return nil
+	return commands, nil
 }
 
-func (v *VarDeps) handleMapAdd(ctx context.Context, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
-	values, ok := payload.Data.(map[string]any)
+func buildScalarCommand(cmdType rule.CommandType, payload eventing.ManualVariablesActionPayload) ([]rule.Command, error) {
+	value, ok := payload.Data.(string)
 	if !ok {
-		return errors.New("data should be a map[string]string")
+		return nil, errors.New("scalar data should be a string")
 	}
-
-	for key, val := range values {
-		str, ok := val.(string)
-		if !ok {
-			return fmt.Errorf("expected string, got %T", val)
-		}
-
-		v.Logger.Info("Setting value", zap.String("field", key), zap.String("value", str))
-		if err := v.HandlerAdapter.SetMapEntry(ctx, payload.VariableRef, hubName, key, str, correlationID); err != nil {
-			return err
-		}
+	inputs, err := json.Marshal(scalarInputs{Scalar: payload.VariableRef, Value: value})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build command inputs for scalar: %w", err)
 	}
-	return nil
+	return []rule.Command{{Type: cmdType, Inputs: inputs}}, nil
 }
 
-func (v *VarDeps) handleMapRemove(ctx context.Context, payload eventing.ManualVariablesActionPayload, hubName, correlationID string) error {
-	values, ok := payload.Data.([]any)
+func buildMapAddCommands(cmdType rule.CommandType, payload eventing.ManualVariablesActionPayload) ([]rule.Command, error) {
+	dataMap, ok := payload.Data.(map[string]any)
 	if !ok {
-		return errors.New("data should be a slice of strings")
+		return nil, errors.New("map add data should be a map")
 	}
 
-	for _, key := range values {
-		k, ok := key.(string)
+	var commands []rule.Command
+	for key, val := range dataMap {
+		value, ok := val.(string)
 		if !ok {
-			return fmt.Errorf("expected string, got %T", key)
+			return nil, fmt.Errorf("map add value for key '%s' must be a string", key)
 		}
-
-		v.Logger.Info("Deleting field", zap.String("field", k))
-		if err := v.HandlerAdapter.RemoveMapEntry(ctx, payload.VariableRef, hubName, k, correlationID); err != nil {
-			return err
+		inputs, err := json.Marshal(mapAddInputs{Map: payload.VariableRef, Key: key, Value: value})
+		if err != nil {
+			return nil, fmt.Errorf("failed to build command inputs for map add: %w", err)
 		}
+		commands = append(commands, rule.Command{Type: cmdType, Inputs: inputs})
 	}
-	return nil
+	return commands, nil
+}
+
+func buildMapRemoveCommands(cmdType rule.CommandType, payload eventing.ManualVariablesActionPayload) ([]rule.Command, error) {
+	keys, ok := payload.Data.([]any)
+	if !ok {
+		return nil, errors.New("map remove data should be an array of keys (strings)")
+	}
+
+	var commands []rule.Command
+	for _, item := range keys {
+		key, ok := item.(string)
+		if !ok {
+			return nil, errors.New("map remove key must be a string")
+		}
+		inputs, err := json.Marshal(mapRemoveInputs{Map: payload.VariableRef, Key: key})
+		if err != nil {
+			return nil, fmt.Errorf("failed to build command inputs for map remove: %w", err)
+		}
+		commands = append(commands, rule.Command{Type: cmdType, Inputs: inputs})
+	}
+	return commands, nil
+}
+
+func determineCommandType(dataType, operation string) (rule.CommandType, error) {
+	switch dataType {
+	case "string", "int", "boolean":
+		return rule.CmdVarScalarUpdate, nil
+	default:
+		t, err := rule.ParseCommandType("variable." + dataType + "." + operation)
+		if err != nil {
+			return "", fmt.Errorf("parse command type from dataType=%q operation=%q: %w", dataType, operation, err)
+		}
+		return t, nil
+	}
 }

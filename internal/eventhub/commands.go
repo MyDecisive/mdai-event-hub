@@ -41,7 +41,9 @@ func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.M
 			clog.Error("unsupported command type", zap.Error(err))
 			return err
 		}
+		// TODO here we should publish the command
 
+		// TODO this is command consumption part, it should publish the result
 		start := time.Now()
 		if err := handler(h, ctx, event, namespace, cmd, payloadData); err != nil {
 			clog.Error("command failed", zap.Error(err), zap.Duration("elapsed", time.Since(start)))
@@ -55,6 +57,9 @@ func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.M
 
 // interpolate evaluates a template string against the current event/payload using the configured engine.
 func (h *EventHub) interpolate(tmpl, opName, what string, event eventing.MdaiEvent) (string, error) {
+	if !strings.Contains(tmpl, "${") {
+		return tmpl, nil // Not a template, return as is.
+	}
 	if h.InterpolationEngine == nil {
 		return "", fmt.Errorf("%s: interpolate %s: interpolation engine is not configured", opName, what)
 	}
