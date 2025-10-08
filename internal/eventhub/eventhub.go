@@ -53,12 +53,15 @@ const (
 	fldCorrelationID = "correlation_id"
 	fldRule          = "rule"
 	fldCommandType   = "command_type"
+
+	varsEventType     = "vars"
+	alertingEventType = "alerting"
 )
 
-// ProcessVariableEvent handles an MdaiEvent according to configured workflows.
+// ProcessVariableEvent handles an MdaiEvent for manual variables' workflow.
 func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
-		logger := h.withEvent(event, "vars")
+		logger := h.withEvent(event, varsEventType)
 		logger.Info("Processing variable event")
 
 		if event.Source != eventing.ManualVariablesEventSource {
@@ -66,8 +69,14 @@ func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInv
 			return nil // non-transient
 		}
 
-		// TODO issue a command event here
-		if err := h.VarsAdapter.HandleManualVariablesActions(ctx, event); err != nil {
+		cmds, err := h.VarsAdapter.BuildCommandFromEvent(event)
+		if err != nil {
+			logger.Error("Error building command from manual variable event", zap.Error(err))
+			return err
+		}
+
+		// TODO this is bulk update for the same variable, we can introduce a bulk command for such cases to reduce possibility of multiple collector restarts
+		if err := h.processCommandsForEvent(ctx, event, cmds, "default", nil, varsEventType); err != nil {
 			logger.Error("Error processing manual variable update event", zap.Error(err))
 			return err
 		}
@@ -80,8 +89,8 @@ func (h *EventHub) ProcessVariableEvent(ctx context.Context) eventing.HandlerInv
 // ProcessAlertingEvent handles an MdaiEvent according to configured workflows.
 func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInvoker {
 	return func(event eventing.MdaiEvent) error {
-		logger := h.withEvent(event, "alerting")
-		logger.Info("Processing alerting event for hub")
+		logger := h.withEvent(event, alertingEventType)
+		logger.Info("Processing alerting event")
 
 		if err := event.Validate(); err != nil {
 			return err
@@ -112,9 +121,9 @@ func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInv
 
 		// one event can trigger several rules
 		for _, r := range rules {
-			clog := h.withEvent(event, "alerting").With(zap.String(fldRule, r.Name))
+			clog := h.withEvent(event, alertingEventType).With(zap.String(fldRule, r.Name))
 			clog.Info("Processing rule")
-			err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, "alerting")
+			err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, alertingEventType)
 			success := err == nil
 			if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, success); auditErr != nil {
 				clog.Error("audit write failed", zap.Error(auditErr))

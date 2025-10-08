@@ -209,16 +209,23 @@ func TestHandleManualVariablesActions(t *testing.T) {
 		},
 	}
 
+	mockHandlerAdapter := &MockHandlerAdapter{Calls: make(map[string][]map[string]string)}
+	mdai := &VarDeps{Logger: zap.NewNop(), HandlerAdapter: mockHandlerAdapter}
+	h := &EventHub{
+		Logger:              zap.NewNop(),
+		InterpolationEngine: nil,
+		VarsAdapter:         *mdai,
+	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			mockHandlerAdapter := &MockHandlerAdapter{Calls: make(map[string][]map[string]string)}
-			mdai := &VarDeps{Logger: zap.NewNop(), HandlerAdapter: mockHandlerAdapter}
 
-			require.NoError(t, mdai.HandleManualVariablesActions(t.Context(), tc.event))
+			cmds, err := mdai.BuildCommandFromEvent(tc.event)
+			require.NoError(t, err)
+			require.NoError(t, h.processCommandsForEvent(t.Context(), tc.event, cmds, "mdai", nil, "vars"))
 			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
 		})
 	}
 }
 
-var _ iHandlerAdapter = (*MockHandlerAdapter)(nil)
+var _ HandlerAdapter = (*MockHandlerAdapter)(nil)

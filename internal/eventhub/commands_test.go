@@ -472,7 +472,7 @@ func TestInterpolate_EngineNotConfigured(t *testing.T) {
 		InterpolationEngine: nil,
 	}
 
-	res, err := h.interpolate("template", "test.op", "value", eventing.MdaiEvent{})
+	res, err := h.interpolate("template ${value}", "test.op", "value", eventing.MdaiEvent{})
 	require.Error(t, err)
 	require.Equal(t, "test.op: interpolate value: interpolation engine is not configured", err.Error())
 	require.Empty(t, res)
@@ -486,7 +486,6 @@ func TestInterpolate_WhitespaceResult(t *testing.T) {
 
 	tmpl := "   "
 	res, err := h.interpolate(tmpl, "test.op", "value", eventing.MdaiEvent{})
-	require.Error(t, err)
-	require.Equal(t, `test.op: interpolate value produced empty (template="   ")`, err.Error())
-	require.Empty(t, res)
+	require.NoError(t, err)
+	require.Equal(t, tmpl, res)
 }
