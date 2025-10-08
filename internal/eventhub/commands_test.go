@@ -479,13 +479,22 @@ func TestInterpolate_EngineNotConfigured(t *testing.T) {
 }
 
 func TestInterpolate_WhitespaceResult(t *testing.T) {
-	h := &EventHub{
-		Logger:              zap.NewNop(),
-		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
-	}
+	h, _, _ := newHubWithAdapter(t)
 
 	tmpl := "   "
 	res, err := h.interpolate(tmpl, "test.op", "value", eventing.MdaiEvent{})
 	require.NoError(t, err)
 	require.Equal(t, tmpl, res)
+}
+
+func TestInterpolate_NoSyntax_ReturnsOriginal(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+
+	input := "a simple string without any template syntax"
+	ev := eventing.MdaiEvent{} // Event is not used in this path
+
+	result, err := h.interpolate(input, "test.op", "test-field", ev)
+
+	require.NoError(t, err)
+	require.Equal(t, input, result, "should return the original string")
 }
