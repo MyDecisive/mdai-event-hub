@@ -48,7 +48,7 @@ func TestRecordAuditEventFromMdaiEvent(t *testing.T) {
 	// Expect exactly the map we build in RecordAuditEventFromMdaiEvent
 	mockAudit.On("InsertAuditLogEventFromMap", t.Context(), expectedMap).Return(nil).Once()
 
-	err := RecordAuditEventFromMdaiEvent(t.Context(), logger, mockAudit, event, testRule, true)
+	err := RecordAuditEventFromMdaiEvent(t.Context(), logger, mockAudit, event, &testRule, true)
 	require.NoError(t, err)
 	mockAudit.AssertExpectations(t)
 

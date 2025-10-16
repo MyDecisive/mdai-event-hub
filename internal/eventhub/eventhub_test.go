@@ -162,7 +162,7 @@ func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {
 func TestProcessVariableEvent_Success(t *testing.T) {
 	h, ma, _ := newHubWithAdapter(t)
 
-	p := eventing.ManualVariablesActionPayload{
+	p := eventing.VariablesActionPayload{
 		VariableRef: "my-set",
 		DataType:    "set",
 		Operation:   "add",
@@ -248,7 +248,7 @@ func TestWithRecover_PanickingHandler(t *testing.T) {
 func TestMatchedRules_EmptyRulesMap(t *testing.T) {
 	rules := make(map[string]rule.Rule)
 
-	result := matchedRules("any.event", rules)
+	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "any.event"}, rules)
 
 	require.Empty(t, result)
 }
@@ -289,7 +289,7 @@ func TestMatchedRules_MultipleMatches(t *testing.T) {
 		},
 	}
 
-	result := matchedRules("high_cpu.firing", rules)
+	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "high_cpu.firing"}, rules)
 
 	require.Len(t, result, 2)
 
@@ -368,7 +368,7 @@ func TestMatchedRules_NoDotInEventName(t *testing.T) {
 		},
 	}
 
-	result := matchedRules("cpu_spike", rules)
+	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "cpu_spike"}, rules)
 	require.Len(t, result, 1)
 	require.Equal(t, "any-status", result[0].Name)
 }

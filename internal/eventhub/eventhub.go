@@ -25,6 +25,7 @@ type EventHub struct {
 	AuditAdapter        *audit.AuditAdapter
 	ConfigMapController *kube.ConfigMapController
 	InterpolationEngine *interpolation.Engine
+	HopLimit            int
 }
 
 func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.HandlerInvoker {
@@ -101,39 +102,63 @@ func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInv
 			return nil // non-transient; don’t send to DLQ
 		}
 
-		automationConfig, err := h.ConfigMapController.GetConfigMapByHubName(event.HubName)
-		if err != nil {
-			return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
-		}
+		return h.processMdaiEvent(ctx, event, logger, matchedRulesByAlertCtx)
+	}
+}
 
-		// TODO change informer logic to cache rules so we don't need to process it here every time
-		rules := matchedRules(event.Name, getRulesMap(logger, automationConfig.Data))
-		if len(rules) == 0 {
-			logger.Warn("No configured automation for event, skipping")
-			// TODO add audit event
-			return nil
-		}
+func (h *EventHub) ProcessTriggerEvent(ctx context.Context) eventing.HandlerInvoker {
+	return func(event eventing.MdaiEvent) error {
+		logger := h.withEvent(event, varsEventType)
+		logger.Info("Processing trigger event")
 
-		payloadData, err := processEventPayload(event)
-		if err != nil {
-			return fmt.Errorf("parse payload: %w", err)
-		}
+		return h.processMdaiEvent(ctx, event, logger, matchedRulesByVariableCtx)
+	}
+}
 
-		// one event can trigger several rules
-		for _, r := range rules {
-			clog := h.withEvent(event, alertingEventType).With(zap.String(fldRule, r.Name))
-			clog.Info("Processing rule")
-			err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, alertingEventType)
-			success := err == nil
-			if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, r, success); auditErr != nil {
-				clog.Error("audit write failed", zap.Error(auditErr))
-			}
-			if err != nil {
-				return err
-			}
+func (h *EventHub) processMdaiEvent(ctx context.Context, event eventing.MdaiEvent, logger *zap.Logger, matchRules RuleMatcher) error {
+	// To prevent infinite processing loops, check the event's RecursionDepth.
+	// This value is incremented for each new event generated from a previously consumed one.
+	// If the depth exceeds the configured HopLimit, we stop processing.
+	hops := event.RecursionDepth
+	if hops >= h.HopLimit {
+		logger.Warn("hop limit reached, stopping processing to prevent infinite loop", zap.Int("hops", hops))
+		return nil
+	}
+
+	automationConfig, err := h.ConfigMapController.GetConfigMapByHubName(event.HubName)
+	if err != nil {
+		return fmt.Errorf("error getting ConfigMap data for hub %s: %w", event.HubName, err)
+	}
+
+	// TODO change informer logic to cache rules so we don't need to process it here every time
+	rules := matchRules(event, getRulesMap(logger, automationConfig.Data))
+	if len(rules) == 0 {
+		logger.Info("No configured automation for event, skipping", zap.String("event_name", event.Name))
+		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, nil, true); auditErr != nil {
+			h.Logger.Error("audit write failed", zap.Error(auditErr))
 		}
 		return nil
 	}
+
+	payloadData, err := processEventPayload(event)
+	if err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+
+	// one event can trigger several rules
+	for _, r := range rules {
+		clog := h.withEvent(event, alertingEventType).With(zap.String(fldRule, r.Name))
+		clog.Info("Processing rule")
+		err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, alertingEventType)
+		success := err == nil
+		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, &r, success); auditErr != nil {
+			clog.Error("audit write failed", zap.Error(auditErr))
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // withEvent returns a child logger enriched with stable event fields.
@@ -148,9 +173,11 @@ func (h *EventHub) withEvent(e eventing.MdaiEvent, component string) *zap.Logger
 	)
 }
 
-// matchedRules matches event type which should be alert name plus status with rules keys.
-func matchedRules(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
-	alertName, alertStatus, _ := strings.Cut(eventName, ".")
+type RuleMatcher func(event eventing.MdaiEvent, rules map[string]rule.Rule) []rule.Rule
+
+// matchedRulesByAlertCtx matches event type which should be alert name plus status with rules keys.
+func matchedRulesByAlertCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
+	alertName, alertStatus, _ := strings.Cut(event.Name, ".")
 
 	eventCtx := triggers.Context{
 		Alert: &triggers.AlertCtx{Name: alertName, Status: alertStatus},
@@ -159,6 +186,29 @@ func matchedRules(eventName string, rulesMap map[string]rule.Rule) []rule.Rule {
 	matched := make([]rule.Rule, 0, len(rulesMap))
 	for _, r := range rulesMap { // iterate over all alerting rules, order is not guaranteed
 		if at, ok := r.Trigger.(*triggers.AlertTrigger); ok && at != nil && at.Match(eventCtx) {
+			matched = append(matched, r)
+		}
+	}
+	return matched
+}
+
+type RulePredicate func(rule.Rule) bool
+
+// matchedRulesByVariableCtx matches event type which should be alert name plus status with rules keys.
+func matchedRulesByVariableCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
+	var payload eventing.VariablesActionPayload
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		// payload is malformed → nothing matches
+		return nil
+	}
+
+	eventCtx := triggers.Context{
+		Variable: &triggers.VariableCtx{Name: payload.VariableRef, UpdateType: payload.Operation},
+	}
+
+	matched := make([]rule.Rule, 0, len(rulesMap))
+	for _, r := range rulesMap { // iterate over all rules, order is not guaranteed
+		if at, ok := r.Trigger.(*triggers.VariableTrigger); ok && at != nil && at.Match(eventCtx) {
 			matched = append(matched, r)
 		}
 	}

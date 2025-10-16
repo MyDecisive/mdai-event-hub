@@ -2,6 +2,8 @@ package eventhub
 
 import (
 	"context"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
@@ -11,62 +13,89 @@ import (
 )
 
 type MockHandlerAdapter struct {
-	Calls map[string][]map[string]string
+	mu    sync.Mutex
+	calls map[string][]map[string]string // key: op+"_calls"
 }
 
-func (mh *MockHandlerAdapter) AddElementToSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
-	mh.Calls["AddElementToSet"] = append(mh.Calls["AddElementToSet"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+func (mh *MockHandlerAdapter) AddElementToSet(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
+	mh.append("AddElementToSet", map[string]string{
+		"variableKey":    variableKey,
+		"hubName":        hubName,
+		"value":          value,
+		"correlationID":  correlationID,
+		"recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (mh *MockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
-	mh.Calls["RemoveElementFromSet"] = append(mh.Calls["RemoveElementFromSet"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+func (mh *MockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
+	mh.append("RemoveElementFromSet", map[string]string{
+		"variableKey":    variableKey,
+		"hubName":        hubName,
+		"value":          value,
+		"correlationID":  correlationID,
+		"recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (mh *MockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string) error {
-	mh.Calls["AddSetMapElement"] = append(mh.Calls["AddSetMapElement"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"field":         field,
-		"value":         value,
-		"correlationID": correlationID,
+func (mh *MockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string, recursionDepth int) error {
+	mh.append("SetMapEntry", map[string]string{
+		"variableKey":    variableKey,
+		"hubName":        hubName,
+		"field":          field,
+		"value":          value,
+		"correlationID":  correlationID,
+		"recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (mh *MockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string) error {
-	mh.Calls["RemoveElementFromMap"] = append(mh.Calls["RemoveElementFromMap"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"field":         field,
-		"correlationID": correlationID,
+func (mh *MockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string, recursionDepth int) error {
+	mh.append("RemoveMapEntry", map[string]string{
+		"variableKey":    variableKey,
+		"hubName":        hubName,
+		"field":          field,
+		"correlationID":  correlationID,
+		"recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (mh *MockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubName, value, correlationID string) error {
-	mh.Calls["SetStringValue"] = append(mh.Calls["SetStringValue"], map[string]string{
-		"variableKey":   variableKey,
-		"hubName":       hubName,
-		"value":         value,
-		"correlationID": correlationID,
+func (mh *MockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
+	mh.append("SetStringValue", map[string]string{
+		"variableKey":    variableKey,
+		"hubName":        hubName,
+		"value":          value,
+		"correlationID":  correlationID,
+		"recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
+}
+
+// --- unexported helpers after exported methods ---
+
+func (mh *MockHandlerAdapter) append(op string, call map[string]string) {
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	if mh.calls == nil {
+		mh.calls = make(map[string][]map[string]string)
+	}
+	k := op + "_calls"
+	mh.calls[k] = append(mh.calls[k], call)
+}
+
+func (mh *MockHandlerAdapter) snapshot(op string) []map[string]string {
+	k := op + "_calls"
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	out := append([]map[string]string(nil), mh.calls[k]...) // copy
+	return out
 }
 
 func TestHandleManualVariablesActions(t *testing.T) {
 	t.Parallel()
+
 	testCases := []struct {
 		description string
 		event       eventing.MdaiEvent
@@ -86,10 +115,11 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			},
 			handlerName: "AddElementToSet",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"value":         "bazfoo",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"value":          "bazfoo",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -105,10 +135,11 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			},
 			handlerName: "RemoveElementFromSet",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"value":         "bazfoo",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"value":          "bazfoo",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -122,13 +153,14 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				CorrelationID: "bob",
 				HubName:       "barbaz",
 			},
-			handlerName: "AddSetMapElement",
+			handlerName: "SetMapEntry",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"field":         "argh",
-				"value":         "blargh",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"field":          "argh",
+				"value":          "blargh",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -142,12 +174,13 @@ func TestHandleManualVariablesActions(t *testing.T) {
 				CorrelationID: "bob",
 				HubName:       "barbaz",
 			},
-			handlerName: "RemoveElementFromMap",
+			handlerName: "RemoveMapEntry",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"field":         "bazfoo",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"field":          "bazfoo",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -163,10 +196,11 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			},
 			handlerName: "SetStringValue",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"value":         "bazfoo",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"value":          "bazfoo",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -182,10 +216,11 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			},
 			handlerName: "SetStringValue",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"value":         "3",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"value":          "3",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 		{
@@ -201,29 +236,35 @@ func TestHandleManualVariablesActions(t *testing.T) {
 			},
 			handlerName: "SetStringValue",
 			expected: map[string]string{
-				"variableKey":   "foobar",
-				"hubName":       "barbaz",
-				"value":         "false",
-				"correlationID": "bob",
+				"variableKey":    "foobar",
+				"hubName":        "barbaz",
+				"value":          "false",
+				"correlationID":  "bob",
+				"recursionDepth": "1",
 			},
 		},
 	}
 
-	mockHandlerAdapter := &MockHandlerAdapter{Calls: make(map[string][]map[string]string)}
-	mdai := &VarDeps{Logger: zap.NewNop(), HandlerAdapter: mockHandlerAdapter}
-	h := &EventHub{
-		Logger:              zap.NewNop(),
-		InterpolationEngine: nil,
-		VarsAdapter:         *mdai,
-	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 
+			// fresh mock and hub per subtest
+			mock := &MockHandlerAdapter{}
+			mdai := &VarDeps{Logger: zap.NewNop(), HandlerAdapter: mock}
+			h := &EventHub{
+				Logger:              zap.NewNop(),
+				InterpolationEngine: nil,
+				VarsAdapter:         *mdai,
+			}
+
 			cmds, err := mdai.BuildCommandFromEvent(tc.event)
 			require.NoError(t, err)
 			require.NoError(t, h.processCommandsForEvent(t.Context(), tc.event, cmds, "mdai", nil, "vars"))
-			assert.Contains(t, mockHandlerAdapter.Calls[tc.handlerName], tc.expected)
+
+			calls := mock.snapshot(tc.handlerName)
+			require.NotEmpty(t, calls)
+			assert.Equal(t, tc.expected, calls[len(calls)-1])
 		})
 	}
 }
