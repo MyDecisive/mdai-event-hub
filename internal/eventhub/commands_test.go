@@ -11,6 +11,7 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/interpolation"
+	"github.com/decisiveai/mdai-data-core/kube/kubetest"
 	"github.com/stretchr/testify/require"
 	vkmock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/mock/gomock"
@@ -75,6 +76,9 @@ func newHubWithAdapter(t *testing.T) (*EventHub, *mockHandlerAdapter, *vkmock.Cl
 		AuditAdapter:        audit.NewAuditAdapter(zap.NewNop(), mockClient),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
+	cfg := kubetest.NewFakeConfigMapStore()
+	h.ConfigMapController = cfg
+	h.HopLimit = 2
 	return h, ma, mockClient
 }
 

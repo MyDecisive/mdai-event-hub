@@ -44,7 +44,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("failed to start NATS publisher", zap.Error(err))
 	}
 
-	hopLimitStr := helpers.GetEnvVariableWithDefault("HOP_LIMIT", "1")
+	hopLimitStr := helpers.GetEnvVariableWithDefault("HOP_LIMIT", "2")
 	hopLimit, err := strconv.Atoi(hopLimitStr)
 	if err != nil {
 		logger.Fatal("invalid HOP_LIMIT value, must be an integer", zap.String("value", hopLimitStr), zap.Error(err))

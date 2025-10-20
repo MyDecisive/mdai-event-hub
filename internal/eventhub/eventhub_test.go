@@ -11,12 +11,16 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/eventing/triggers"
+	"github.com/decisiveai/mdai-data-core/kube"
+	"github.com/decisiveai/mdai-data-core/kube/kubetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/valkey-io/valkey-go"
 	vkmock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestProcessAlertingEvent_NoHubName(t *testing.T) {
@@ -88,17 +92,14 @@ func (XaddMatcher) Matches(x any) bool {
 	}
 	return false
 }
-
-func (XaddMatcher) String() string {
-	return "Wanted XADD to mdai_hub_event_history command"
-}
+func (XaddMatcher) String() string { return "Wanted XADD to mdai_hub_event_history command" }
 
 func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 	h, ma, client := newHubWithAdapter(t)
-	client.EXPECT().Do(mock.MatchedBy(func(arg any) bool {
-		_, ok := arg.(context.Context)
-		return ok
-	}), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+	client.EXPECT().
+		Do(mock.Anything, XaddMatcher{}).
+		Return(vkmock.Result(vkmock.ValkeyString(""))).
+		AnyTimes()
 
 	payload := map[string]any{
 		"labels": map[string]any{
@@ -145,17 +146,13 @@ func TestProcessVariableEvent_UnsupportedSource(t *testing.T) {
 
 	invoker := h.ProcessVariableEvent(context.Background())
 	err := invoker(eventing.MdaiEvent{
-		ID:      "1",
-		Name:    "any",
-		HubName: "t7y",
-		// Payload is not validated in ProcessVariableEvent path before the source check,
-		// but including it keeps the shape consistent.
+		ID:        "1",
+		Name:      "any",
+		HubName:   "t7y",
 		Payload:   `{}`,
 		Timestamp: time.Now().UTC(),
 		Source:    "something_else",
 	})
-
-	// Current behavior: warn & skip ⇒ no error
 	require.NoError(t, err)
 }
 
@@ -183,7 +180,6 @@ func TestProcessVariableEvent_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify adapter call
 	calls, ok := ma.calls["AddElementToSet"]
 	require.True(t, ok, "AddElementToSet was not called")
 	require.Len(t, calls, 1)
@@ -247,53 +243,21 @@ func TestWithRecover_PanickingHandler(t *testing.T) {
 
 func TestMatchedRules_EmptyRulesMap(t *testing.T) {
 	rules := make(map[string]rule.Rule)
-
 	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "any.event"}, rules)
-
 	require.Empty(t, result)
 }
 
 func TestMatchedRules_MultipleMatches(t *testing.T) {
 	rules := map[string]rule.Rule{
-		"rule1": {
-			Name: "rule1-match",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "high_cpu",
-				Status: "firing",
-			},
-		},
-		"rule2": {
-			Name: "rule2-no-match-status",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "high_cpu",
-				Status: "resolved",
-			},
-		},
-		"rule3": {
-			Name: "rule3-match-any-status",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "high_cpu",
-				Status: "", // should match any status
-			},
-		},
-		"rule4": {
-			Name: "rule4-no-match-name",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "high_memory",
-				Status: "firing",
-			},
-		},
-		"rule5": {
-			Name:    "rule5-non-alert-trigger",
-			Trigger: nil,
-		},
+		"rule1": {Name: "rule1-match", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: "firing"}},
+		"rule2": {Name: "rule2-no-match-status", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: "resolved"}},
+		"rule3": {Name: "rule3-match-any-status", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: ""}},
+		"rule4": {Name: "rule4-no-match-name", Trigger: &triggers.AlertTrigger{Name: "high_memory", Status: "firing"}},
+		"rule5": {Name: "rule5-non-alert-trigger", Trigger: nil},
 	}
 
 	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "high_cpu.firing"}, rules)
-
 	require.Len(t, result, 2)
-
-	// Check that the correct rules were returned, regardless of order
 	resultNames := []string{result[0].Name, result[1].Name}
 	require.Contains(t, resultNames, "rule1-match")
 	require.Contains(t, resultNames, "rule3-match-any-status")
@@ -309,7 +273,7 @@ func TestProcessEventPayload_Success(t *testing.T) {
 	}
 
 	result, err := processEventPayload(event)
-	require.NoError(t, err, "expected no error for valid JSON payload")
+	require.NoError(t, err)
 
 	assert.Contains(t, result, "key1")
 	assert.Contains(t, result, "key2")
@@ -318,7 +282,7 @@ func TestProcessEventPayload_Success(t *testing.T) {
 	assert.Equal(t, "value1", result["key1"])
 	assert.InDelta(t, float64(42), result["key2"], 0.001)
 	nested, ok := result["nested"].(map[string]any)
-	assert.True(t, ok, "expected nested to be a map[string]any")
+	assert.True(t, ok)
 	assert.Equal(t, "val", nested["sub"])
 }
 
@@ -332,8 +296,8 @@ func TestProcessEventPayload_InvalidJSON(t *testing.T) {
 	}
 
 	result, err := processEventPayload(event)
-	assert.Nil(t, result, "expected result to be nil on invalid JSON")
-	require.Error(t, err, "expected an error for invalid JSON payload")
+	assert.Nil(t, result)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to unmarshal payload")
 }
 
@@ -350,22 +314,9 @@ func TestProcessEventPayload_EmptyPayload(t *testing.T) {
 func TestMatchedRules_NoDotInEventName(t *testing.T) {
 	t.Parallel()
 
-	// When eventName has no ".", status is empty and name == whole string.
 	rules := map[string]rule.Rule{
-		"need-any-status": {
-			Name: "any-status",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "cpu_spike",
-				Status: "", // match any status
-			},
-		},
-		"need-firing": {
-			Name: "need-firing",
-			Trigger: &triggers.AlertTrigger{
-				Name:   "cpu_spike",
-				Status: "firing", // should NOT match (event has empty status)
-			},
-		},
+		"need-any-status": {Name: "any-status", Trigger: &triggers.AlertTrigger{Name: "cpu_spike", Status: ""}},
+		"need-firing":     {Name: "need-firing", Trigger: &triggers.AlertTrigger{Name: "cpu_spike", Status: "firing"}},
 	}
 
 	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "cpu_spike"}, rules)
@@ -390,7 +341,6 @@ func TestGetRulesMap_SkipsUnknownTopLevelFields(t *testing.T) {
 		}`,
 	}
 	got := getRulesMap(zap.NewNop(), hubData)
-	// r2 is skipped, r1 is kept.
 	require.Len(t, got, 1)
 	_, ok := got["r1"]
 	require.True(t, ok)
@@ -419,4 +369,82 @@ func TestWithRecover_PanicNonStringValue(t *testing.T) {
 	err := wrapped(eventing.MdaiEvent{ID: "e2"})
 	require.Error(t, err)
 	require.Equal(t, "panic: 42", err.Error())
+}
+
+func TestProcessTriggerEvent_Success(t *testing.T) {
+	h, ma, client := newHubWithAdapter(t)
+
+	// Seed the exported fake ConfigMap store with a rule that matches the event.
+	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
+	require.True(t, ok, "expected FakeConfigMapStore")
+	ruleJSON := `{
+  "name": "rule-on-var-change",
+  "trigger": {
+    "kind": "variable",
+    "spec": {
+      "name": "my-set",
+      "update_type": "added"
+    }
+  },
+  "commands": [
+    {
+      "type": "variable.scalar.update",
+      "inputs": {
+        "scalar": "my-string",
+        "value": "triggered"
+      }
+    }
+  ]
+}`
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cm-rules",
+			Namespace: "ns-1",
+			Labels: map[string]string{
+				kube.LabelMdaiHubName:   "hub-1",
+				kube.ConfigMapTypeLabel: kube.AutomationConfigMapType,
+			},
+		},
+		Data: map[string]string{"rule1": ruleJSON},
+	}
+	cfg.SetHubConfigMaps("hub-1", []*corev1.ConfigMap{cm})
+	require.NoError(t, cfg.Run())
+
+	// Mock the audit event history write
+	client.EXPECT().Do(context.Background(), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+
+	// Create the event that will trigger the rule
+	p := eventing.VariablesActionPayload{
+		VariableRef: "my-set",
+		DataType:    "set",
+		Operation:   "added",
+		Data:        []string{"new-val"},
+	}
+	payload, err := json.Marshal(p)
+	require.NoError(t, err)
+
+	event := eventing.MdaiEvent{
+		Name:          "variable.set.add",
+		HubName:       "hub-1",
+		Payload:       string(payload),
+		CorrelationID: "cid-trigger-1",
+		Source:        eventing.ManualVariablesEventSource,
+	}
+
+	// Invoke the handler
+	invoker := h.ProcessTriggerEvent(context.Background())
+	err = invoker(event)
+	require.NoError(t, err)
+
+	// Verify the command handler was called correctly
+	calls, ok := ma.calls["SetStringValue"]
+	require.True(t, ok, "SetStringValue was not called")
+	require.Len(t, calls, 1)
+
+	got := calls[0]
+	require.Equal(t, "my-string", got["variableKey"])
+	require.Equal(t, "hub-1", got["hubName"])
+	require.Equal(t, "triggered", got["value"])
+	require.Equal(t, "cid-trigger-1", got["correlationID"])
 }

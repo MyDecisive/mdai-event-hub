@@ -23,7 +23,7 @@ type EventHub struct {
 	VarsAdapter         VarDeps
 	Kube                kubernetes.Interface
 	AuditAdapter        *audit.AuditAdapter
-	ConfigMapController *kube.ConfigMapController
+	ConfigMapController kube.ConfigMapStore
 	InterpolationEngine *interpolation.Engine
 	HopLimit            int
 }
