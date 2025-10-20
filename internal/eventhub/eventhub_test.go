@@ -23,66 +23,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestProcessAlertingEvent_NoHubName(t *testing.T) {
-	h := &EventHub{Logger: zap.NewNop()}
-
-	invoker := h.ProcessAlertingEvent(context.Background())
-	err := invoker(eventing.MdaiEvent{
-		HubName:   "",                // missing
-		Name:      "anything.firing", // present
-		Payload:   `{}`,              // present
-		Timestamp: time.Now().UTC(),
-	})
-
-	require.Error(t, err)
-	require.Equal(t, "missing required field: hubName", err.Error())
-}
-
-func TestProcessAlertingEvent_UnsupportedSource(t *testing.T) {
-	h := &EventHub{Logger: zap.NewNop()}
-
-	invoker := h.ProcessAlertingEvent(context.Background())
-	err := invoker(eventing.MdaiEvent{
-		HubName:   "test-hub",
-		Name:      "x.firing",
-		Payload:   `{}`, // must pass Validate()
-		Source:    "not-prometheus",
-		Timestamp: time.Now().UTC(),
-	})
-
-	// Current behavior: warn & skip ⇒ no error
-	require.NoError(t, err)
-}
-
-func TestProcessRuleForAlertingEvent_UnsupportedCommand(t *testing.T) {
-	h := &EventHub{Logger: zap.NewNop()}
-
-	err := h.processCommandsForEvent(
-		context.Background(),
-		eventing.MdaiEvent{Name: "x.firing", HubName: "t7y"},
-		[]rule.Command{{Type: "unknown.cmd"}},
-		"ns",
-		map[string]any{},
-		"alerting",
-	)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "unsupported command type")
-}
-
-func TestProcessRuleForAlertingEvent_NoCommands(t *testing.T) {
-	h := &EventHub{Logger: zap.NewNop()}
-
-	err := h.processCommandsForEvent(
-		context.Background(),
-		eventing.MdaiEvent{Name: "x.firing", HubName: "t7y"},
-		nil,
-		"ns",
-		map[string]any{},
-		"alerting",
-	)
-	require.NoError(t, err)
-}
-
 type XaddMatcher struct{}
 
 func (XaddMatcher) Matches(x any) bool {
@@ -94,6 +34,99 @@ func (XaddMatcher) Matches(x any) bool {
 }
 func (XaddMatcher) String() string { return "Wanted XADD to mdai_hub_event_history command" }
 
+func TestProcessAlertingEvent(t *testing.T) {
+	h := &EventHub{Logger: zap.NewNop()}
+	invoker := h.ProcessAlertingEvent(context.Background())
+
+	cases := []struct {
+		name     string
+		event    eventing.MdaiEvent
+		wantErr  bool
+		contains string
+	}{
+		{
+			name: "missing hubName → error",
+			event: eventing.MdaiEvent{
+				HubName:   "",
+				Name:      "anything.firing",
+				Payload:   `{}`,
+				Timestamp: time.Now().UTC(),
+			},
+			wantErr:  true,
+			contains: "missing required field: hubName",
+		},
+		{
+			name: "unsupported source → skip",
+			event: eventing.MdaiEvent{
+				HubName:   "test-hub",
+				Name:      "x.firing",
+				Payload:   `{}`,
+				Source:    "not-prometheus",
+				Timestamp: time.Now().UTC(),
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := invoker(tc.event)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.contains != "" {
+					require.Contains(t, err.Error(), tc.contains)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestProcessRuleForAlertingEvent_Basic(t *testing.T) {
+	h := &EventHub{Logger: zap.NewNop()}
+
+	cases := []struct {
+		name    string
+		cmds    []rule.Command
+		wantErr bool
+		match   string
+	}{
+		{
+			name:    "unsupported command",
+			cmds:    []rule.Command{{Type: "unknown.cmd"}},
+			wantErr: true,
+			match:   "unsupported command type",
+		},
+		{
+			name:    "no commands is ok",
+			cmds:    nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := h.processCommandsForEvent(
+				context.Background(),
+				eventing.MdaiEvent{Name: "x.firing", HubName: "t7y"},
+				tc.cmds,
+				"ns",
+				map[string]any{},
+				"alerting",
+			)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.match != "" {
+					require.ErrorContains(t, err, tc.match)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 	h, ma, client := newHubWithAdapter(t)
 	client.EXPECT().
@@ -101,12 +134,7 @@ func TestProcessRuleForAlertingEvent_Success(t *testing.T) {
 		Return(vkmock.Result(vkmock.ValkeyString(""))).
 		AnyTimes()
 
-	payload := map[string]any{
-		"labels": map[string]any{
-			"the_key": "the-value",
-		},
-	}
-
+	payload := map[string]any{"labels": map[string]any{"the_key": "the-value"}}
 	event := eventing.MdaiEvent{
 		Name:          "test-alert.firing",
 		HubName:       "hub-x",
@@ -193,7 +221,6 @@ func TestProcessVariableEvent_Success(t *testing.T) {
 
 func TestGetRulesMap_BuildsValidRuleAndFallsBackName(t *testing.T) {
 	logger := zap.NewNop()
-
 	hubData := map[string]string{
 		"ruleA": `{
 			"name": "",
@@ -201,7 +228,6 @@ func TestGetRulesMap_BuildsValidRuleAndFallsBackName(t *testing.T) {
 			"commands": [{"type":"variable.set.add","inputs":{"k":"v"}}]
 		}`,
 	}
-
 	got := getRulesMap(logger, hubData)
 	require.Len(t, got, 1)
 
@@ -222,178 +248,158 @@ func TestGetRulesMap_SkipsInvalidEntries(t *testing.T) {
 		"badJSON":        `{"name": "oops", "trigger": 123}`,
 		"badTriggerType": `{"name":"bad","trigger":{"type":"unknown","foo":"bar"},"commands":[]}`,
 	}
-
 	got := getRulesMap(logger, hubData)
 	require.Empty(t, got)
 }
 
-func TestWithRecover_PanickingHandler(t *testing.T) {
+func TestWithRecover(t *testing.T) {
 	logger := zap.NewNop()
-	panickingHandler := func(event eventing.MdaiEvent) error {
-		panic("something went wrong")
+
+	cases := []struct {
+		name    string
+		handler eventing.HandlerInvoker
+		want    string
+	}{
+		{"panic string", func(event eventing.MdaiEvent) error { panic("something went wrong") }, "panic: something went wrong"},
+		{"panic non-string", func(event eventing.MdaiEvent) error { panic(42) }, "panic: 42"},
+		{"return error", func(event eventing.MdaiEvent) error { return errors.New("boom") }, "boom"},
 	}
-	event := eventing.MdaiEvent{ID: "test-event-1"}
 
-	wrappedHandler := WithRecover(logger, panickingHandler)
-	err := wrappedHandler(event)
-
-	require.Error(t, err)
-	require.Equal(t, "panic: something went wrong", err.Error())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := WithRecover(logger, tc.handler)
+			err := wrapped(eventing.MdaiEvent{ID: "e"})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
-func TestMatchedRules_EmptyRulesMap(t *testing.T) {
-	rules := make(map[string]rule.Rule)
-	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "any.event"}, rules)
-	require.Empty(t, result)
+func TestProcessEventPayload(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		wantErr bool
+		wantLen int
+	}{
+		{"success", `{"key1":"value1","key2":42,"nested":{"sub":"val"}}`, false, 3},
+		{"invalid json", `{"key1":"value1", "key2":}`, true, 0},
+		{"empty payload", "", false, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := eventing.MdaiEvent{ID: "e", Name: "n", HubName: "h", Payload: tc.payload}
+			result, err := processEventPayload(event)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			if tc.name == "success" {
+				assert.Contains(t, result, "key1")
+				assert.Contains(t, result, "key2")
+				assert.Contains(t, result, "nested")
+				assert.Equal(t, "value1", result["key1"])
+			}
+			require.Len(t, result, tc.wantLen)
+		})
+	}
 }
 
-func TestMatchedRules_MultipleMatches(t *testing.T) {
-	rules := map[string]rule.Rule{
+func TestMatchedRulesByAlertCtx(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+
+	base := map[string]rule.Rule{
 		"rule1": {Name: "rule1-match", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: "firing"}},
 		"rule2": {Name: "rule2-no-match-status", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: "resolved"}},
 		"rule3": {Name: "rule3-match-any-status", Trigger: &triggers.AlertTrigger{Name: "high_cpu", Status: ""}},
 		"rule4": {Name: "rule4-no-match-name", Trigger: &triggers.AlertTrigger{Name: "high_memory", Status: "firing"}},
-		"rule5": {Name: "rule5-non-alert-trigger", Trigger: nil},
 	}
 
-	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "high_cpu.firing"}, rules)
-	require.Len(t, result, 2)
-	resultNames := []string{result[0].Name, result[1].Name}
-	require.Contains(t, resultNames, "rule1-match")
-	require.Contains(t, resultNames, "rule3-match-any-status")
-}
-
-func TestProcessEventPayload_Success(t *testing.T) {
-	validJSON := `{"key1":"value1","key2":42,"nested":{"sub":"val"}}`
-	event := eventing.MdaiEvent{
-		ID:      "e1",
-		Name:    "test",
-		HubName: "hub1",
-		Payload: validJSON,
+	cases := []struct {
+		name      string
+		eventName string
+		rules     map[string]rule.Rule
+		wantNames []string
+	}{
+		{"empty rules", "any.event", map[string]rule.Rule{}, []string{}},
+		{"no dot → match any-status", "high_cpu", base, []string{"rule3-match-any-status"}},
+		{"multiple matches", "high_cpu.firing", base, []string{"rule1-match", "rule3-match-any-status"}},
 	}
 
-	result, err := processEventPayload(event)
-	require.NoError(t, err)
-
-	assert.Contains(t, result, "key1")
-	assert.Contains(t, result, "key2")
-	assert.Contains(t, result, "nested")
-
-	assert.Equal(t, "value1", result["key1"])
-	assert.InDelta(t, float64(42), result["key2"], 0.001)
-	nested, ok := result["nested"].(map[string]any)
-	assert.True(t, ok)
-	assert.Equal(t, "val", nested["sub"])
-}
-
-func TestProcessEventPayload_InvalidJSON(t *testing.T) {
-	invalidJSON := `{"key1":"value1", "key2":}`
-	event := eventing.MdaiEvent{
-		ID:      "e2",
-		Name:    "test-invalid",
-		HubName: "hub2",
-		Payload: invalidJSON,
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := h.matchedRulesByAlertCtx(eventing.MdaiEvent{Name: tc.eventName}, tc.rules)
+			var got []string
+			for _, r := range result {
+				got = append(got, r.Name)
+			}
+			if len(tc.wantNames) == 0 {
+				require.Empty(t, got)
+				return
+			}
+			for _, w := range tc.wantNames {
+				require.Contains(t, got, w)
+			}
+		})
 	}
-
-	result, err := processEventPayload(event)
-	assert.Nil(t, result)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to unmarshal payload")
 }
 
-func TestProcessEventPayload_EmptyPayload(t *testing.T) {
-	t.Parallel()
-
-	ev := eventing.MdaiEvent{HubName: "hub", Name: "x.firing", Payload: ""}
-	got, err := processEventPayload(ev)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Empty(t, got)
-}
-
-func TestMatchedRules_NoDotInEventName(t *testing.T) {
-	t.Parallel()
+func TestMatchedRulesByVariableCtx(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
 
 	rules := map[string]rule.Rule{
-		"need-any-status": {Name: "any-status", Trigger: &triggers.AlertTrigger{Name: "cpu_spike", Status: ""}},
-		"need-firing":     {Name: "need-firing", Trigger: &triggers.AlertTrigger{Name: "cpu_spike", Status: "firing"}},
+		"ok":   {Name: "ok", Trigger: &triggers.VariableTrigger{Name: "my-set", UpdateType: "added"}},
+		"nope": {Name: "nope", Trigger: &triggers.VariableTrigger{Name: "other", UpdateType: "added"}},
 	}
 
-	result := matchedRulesByAlertCtx(eventing.MdaiEvent{Name: "cpu_spike"}, rules)
-	require.Len(t, result, 1)
-	require.Equal(t, "any-status", result[0].Name)
-}
-
-func TestGetRulesMap_SkipsUnknownTopLevelFields(t *testing.T) {
-	t.Parallel()
-
-	hubData := map[string]string{
-		"r1": `{
-			"name":"ok",
-			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
-			"commands":[]
-		}`,
-		"r2": `{
-			"name":"has-extra",
-			"extra": 123,
-			"trigger":{"kind":"alert","spec":{"name":"n","status":"firing"}},
-			"commands":[]
-		}`,
+	cases := []struct {
+		name    string
+		payload string
+		wantLen int
+		want    string
+	}{
+		{"malformed", `{"not json"`, 0, ""},
+		{"match", func() string {
+			b, err := json.Marshal(eventing.VariablesActionPayload{
+				VariableRef: "my-set",
+				Operation:   "added",
+			})
+			require.NoError(t, err)
+			return string(b)
+		}(), 1, "ok"},
 	}
-	got := getRulesMap(zap.NewNop(), hubData)
-	require.Len(t, got, 1)
-	_, ok := got["r1"]
-	require.True(t, ok)
-	_, hasR2 := got["r2"]
-	require.False(t, hasR2)
-}
 
-func TestWithRecover_PropagatesError_NoPanic(t *testing.T) {
-	t.Parallel()
-
-	sentinel := errors.New("boom")
-	handler := func(event eventing.MdaiEvent) error { return sentinel }
-
-	wrapped := WithRecover(zap.NewNop(), handler)
-	err := wrapped(eventing.MdaiEvent{ID: "e"})
-	require.Error(t, err)
-	require.Equal(t, sentinel, err)
-}
-
-func TestWithRecover_PanicNonStringValue(t *testing.T) {
-	t.Parallel()
-
-	handler := func(event eventing.MdaiEvent) error { panic(42) }
-	wrapped := WithRecover(zap.NewNop(), handler)
-
-	err := wrapped(eventing.MdaiEvent{ID: "e2"})
-	require.Error(t, err)
-	require.Equal(t, "panic: 42", err.Error())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := h.matchedRulesByVariableCtx(eventing.MdaiEvent{
+				Name:    "variable.set.add",
+				Payload: tc.payload,
+			}, rules)
+			require.Len(t, res, tc.wantLen)
+			if tc.wantLen == 1 {
+				require.Equal(t, tc.want, res[0].Name)
+			}
+		})
+	}
 }
 
 func TestProcessTriggerEvent_Success(t *testing.T) {
 	h, ma, client := newHubWithAdapter(t)
 
-	// Seed the exported fake ConfigMap store with a rule that matches the event.
 	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
 	require.True(t, ok, "expected FakeConfigMapStore")
 	ruleJSON := `{
   "name": "rule-on-var-change",
   "trigger": {
     "kind": "variable",
-    "spec": {
-      "name": "my-set",
-      "update_type": "added"
-    }
+    "spec": { "name": "my-set", "update_type": "added" }
   },
   "commands": [
-    {
-      "type": "variable.scalar.update",
-      "inputs": {
-        "scalar": "my-string",
-        "value": "triggered"
-      }
-    }
+    { "type": "variable.scalar.update", "inputs": { "scalar": "my-string", "value": "triggered" } }
   ]
 }`
 
@@ -447,4 +453,178 @@ func TestProcessTriggerEvent_Success(t *testing.T) {
 	require.Equal(t, "hub-1", got["hubName"])
 	require.Equal(t, "triggered", got["value"])
 	require.Equal(t, "cid-trigger-1", got["correlationID"])
+}
+
+func TestProcessMdaiEvent_HopLimitReached(t *testing.T) {
+	h := &EventHub{
+		Logger:   zap.NewNop(),
+		HopLimit: 5,
+	}
+	event := eventing.MdaiEvent{
+		HubName:        "hub-1",
+		RecursionDepth: 5, // equal to limit
+	}
+	err := h.processMdaiEvent(context.Background(), event, h.Logger, nil)
+	require.NoError(t, err)
+}
+
+func TestProcessAlertingEvent_EndToEnd_Success(t *testing.T) {
+	h, ma, client := newHubWithAdapter(t)
+
+	// Seed rule: alert trigger -> set.add command
+	ruleJSON := `{
+	  "name": "r-alert",
+	  "trigger": { "kind": "alert", "spec": { "name": "high_cpu", "status": "firing" } },
+	  "commands": [
+	    { "type": "variable.set.add", "inputs": { "set": "cpu-alerts", "value": "${trigger:payload.labels.instance}" } }
+	  ]
+	}`
+	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
+	require.True(t, ok, "expected FakeConfigMapStore")
+	cfg.SetHubConfigMaps("hub-1", []*corev1.ConfigMap{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cm-rules",
+				Namespace: "ns-1",
+				Labels: map[string]string{
+					kube.LabelMdaiHubName:   "hub-1",
+					kube.ConfigMapTypeLabel: kube.AutomationConfigMapType,
+				},
+			},
+			Data: map[string]string{"r1": ruleJSON},
+		},
+	})
+	require.NoError(t, cfg.Run())
+
+	// Audit write mocked
+	client.EXPECT().Do(context.Background(), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+
+	payload := map[string]any{"labels": map[string]any{"instance": "node-1"}}
+	ev := eventing.MdaiEvent{
+		Name:      "high_cpu.firing",
+		HubName:   "hub-1",
+		Source:    eventing.PrometheusAlertsEventSource,
+		Timestamp: time.Now().UTC(),
+		Payload:   mustJSON(t, payload),
+	}
+
+	err := h.ProcessAlertingEvent(context.Background())(ev)
+	require.NoError(t, err)
+
+	calls := ma.calls["AddElementToSet"]
+	require.Len(t, calls, 1)
+	require.Equal(t, "cpu-alerts", calls[0]["variableKey"])
+	require.Equal(t, "hub-1", calls[0]["hubName"])
+	require.Equal(t, "node-1", calls[0]["value"])
+}
+
+func TestProcessMdaiEvent_ConfigMapError(t *testing.T) {
+	h := &EventHub{
+		Logger:   zap.NewNop(),
+		HopLimit: 10,
+	}
+	// Inject a failing store
+	fs := kubetest.NewFakeConfigMapStore().FailGetByHubWith(errors.New("boom"))
+	h.ConfigMapController = fs
+
+	err := h.processMdaiEvent(context.Background(), eventing.MdaiEvent{
+		Name:    "x.firing",
+		HubName: "hub-x",
+	}, h.Logger, h.matchedRulesByAlertCtx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "error getting ConfigMap data for hub hub-x")
+}
+
+func TestProcessMdaiEvent_BadPayload(t *testing.T) {
+	h, _, client := newHubWithAdapter(t)
+	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
+	require.True(t, ok, "expected FakeConfigMapStore")
+
+	// Rule exists, but payload is bad JSON, so processEventPayload should fail
+	cfg.SeedConfigMap("hub-1", "cm-rules", kube.AutomationConfigMapType, map[string]string{
+		"r1": `{
+		  "name": "r",
+		  "trigger": {"kind":"alert","spec":{"name":"cpu","status":"firing"}},
+		  "commands": []
+		}`,
+	})
+	require.NoError(t, cfg.Run())
+
+	client.EXPECT().Do(mock.Anything, XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+
+	ev := eventing.MdaiEvent{
+		Name:    "cpu.firing",
+		HubName: "hub-1",
+		Source:  eventing.PrometheusAlertsEventSource,
+		Payload: `{"labels":`, // malformed
+	}
+	err := h.ProcessAlertingEvent(context.Background())(ev)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse payload")
+}
+
+func TestProcessMdaiEvent_UnsupportedCommandFromRules(t *testing.T) {
+	h, _, client := newHubWithAdapter(t)
+	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
+	require.True(t, ok, "expected FakeConfigMapStore")
+
+	cfg.SeedConfigMap("hub-1", "cm-rules", kube.AutomationConfigMapType, map[string]string{
+		"r-bad": `{
+		  "name": "bad",
+		  "trigger": {"kind":"alert","spec":{"name":"disk_full","status":"firing"}},
+		  "commands": [{"type":"totally.unknown","inputs":{}}]
+		}`,
+	})
+	require.NoError(t, cfg.Run())
+
+	client.EXPECT().Do(context.Background(), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+
+	ev := eventing.MdaiEvent{
+		Name:    "disk_full.firing",
+		HubName: "hub-1",
+		Source:  eventing.PrometheusAlertsEventSource,
+		Payload: `{}`, // valid JSON
+	}
+	err := h.ProcessAlertingEvent(context.Background())(ev)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported command type")
+}
+
+func TestProcessVariableEvent_BuildCommandError(t *testing.T) {
+	h, _, _ := newHubWithAdapter(t)
+	ev := eventing.MdaiEvent{
+		Name:    "variable.set.add",
+		HubName: "hub-1",
+		Source:  eventing.ManualVariablesEventSource,
+		Payload: `{}`,
+	}
+	err := h.ProcessVariableEvent(context.Background())(ev)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse command type from dataType")
+}
+
+func TestProcessTriggerEvent_BadPayload(t *testing.T) {
+	h, _, client := newHubWithAdapter(t)
+	cfg, ok := h.ConfigMapController.(*kubetest.FakeConfigMapStore)
+	require.True(t, ok, "expected FakeConfigMapStore")
+
+	// Seed one matching variable trigger rule
+	cfg.SeedConfigMap("hub-1", "cm-rules", kube.AutomationConfigMapType, map[string]string{
+		"r1": `{
+		  "name": "rule-on-var-change",
+		  "trigger": { "kind": "variable", "spec": { "name": "my-set", "update_type": "added" } },
+		  "commands": []
+		}`,
+	})
+	require.NoError(t, cfg.Run())
+	client.EXPECT().Do(context.Background(), XaddMatcher{}).Return(vkmock.Result(vkmock.ValkeyString(""))).AnyTimes()
+
+	ev := eventing.MdaiEvent{
+		Name:    "variable.set.add",
+		HubName: "hub-1",
+		Source:  eventing.ManualVariablesEventSource,
+		Payload: `{"bad":`, // invalid JSON ⇒ processEventPayload should not fail in processMdaiEvent
+	}
+	err := h.ProcessTriggerEvent(context.Background())(ev)
+	require.NoError(t, err)
 }

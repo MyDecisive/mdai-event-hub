@@ -102,7 +102,7 @@ func (h *EventHub) ProcessAlertingEvent(ctx context.Context) eventing.HandlerInv
 			return nil // non-transient; don’t send to DLQ
 		}
 
-		return h.processMdaiEvent(ctx, event, logger, matchedRulesByAlertCtx)
+		return h.processMdaiEvent(ctx, event, logger, h.matchedRulesByAlertCtx)
 	}
 }
 
@@ -111,7 +111,7 @@ func (h *EventHub) ProcessTriggerEvent(ctx context.Context) eventing.HandlerInvo
 		logger := h.withEvent(event, varsEventType)
 		logger.Info("Processing trigger event")
 
-		return h.processMdaiEvent(ctx, event, logger, matchedRulesByVariableCtx)
+		return h.processMdaiEvent(ctx, event, logger, h.matchedRulesByVariableCtx)
 	}
 }
 
@@ -131,7 +131,7 @@ func (h *EventHub) processMdaiEvent(ctx context.Context, event eventing.MdaiEven
 	}
 
 	// TODO change informer logic to cache rules so we don't need to process it here every time
-	rules := matchRules(event, getRulesMap(logger, automationConfig.Data))
+	rules := matchRules(event, getRulesMap(h.Logger, automationConfig.Data))
 	if len(rules) == 0 {
 		logger.Info("No configured automation for event, skipping", zap.String("event_name", event.Name))
 		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, nil, true); auditErr != nil {
@@ -176,7 +176,7 @@ func (h *EventHub) withEvent(e eventing.MdaiEvent, component string) *zap.Logger
 type RuleMatcher func(event eventing.MdaiEvent, rules map[string]rule.Rule) []rule.Rule
 
 // matchedRulesByAlertCtx matches event type which should be alert name plus status with rules keys.
-func matchedRulesByAlertCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
+func (*EventHub) matchedRulesByAlertCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
 	alertName, alertStatus, _ := strings.Cut(event.Name, ".")
 
 	eventCtx := triggers.Context{
@@ -192,13 +192,16 @@ func matchedRulesByAlertCtx(event eventing.MdaiEvent, rulesMap map[string]rule.R
 	return matched
 }
 
-type RulePredicate func(rule.Rule) bool
-
 // matchedRulesByVariableCtx matches event type which should be alert name plus status with rules keys.
-func matchedRulesByVariableCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
+func (h *EventHub) matchedRulesByVariableCtx(event eventing.MdaiEvent, rulesMap map[string]rule.Rule) []rule.Rule {
 	var payload eventing.VariablesActionPayload
 	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 		// payload is malformed → nothing matches
+		h.Logger.Warn("could not unmarshal variable event payload",
+			zap.String(fldEventID, event.ID),
+			zap.String(fldCorrelationID, event.CorrelationID),
+			zap.Error(err),
+		)
 		return nil
 	}
 
