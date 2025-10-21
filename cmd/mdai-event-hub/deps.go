@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	datacorepublisher "github.com/decisiveai/mdai-data-core/eventing/publisher"
 	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
-	"github.com/decisiveai/mdai-data-core/helpers"
 	"github.com/decisiveai/mdai-data-core/interpolation"
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-data-core/valkey"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 )
 
 const publisherClientName = "publisher-mdai-event-hub"
+
+type Config struct {
+	HopLimit int `default:"2" envconfig:"HOP_LIMIT"`
+}
 
 func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventhub.EventHub, cleanup func()) { //nolint:nonamedreturns
 	valkeyClient, err := valkey.Init(ctx, logger, valkey.NewConfig())
@@ -44,10 +47,9 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("failed to start NATS publisher", zap.Error(err))
 	}
 
-	hopLimitStr := helpers.GetEnvVariableWithDefault("HOP_LIMIT", "2")
-	hopLimit, err := strconv.Atoi(hopLimitStr)
-	if err != nil {
-		logger.Fatal("invalid HOP_LIMIT value, must be an integer", zap.String("value", hopLimitStr), zap.Error(err))
+	var config Config
+	if err := envconfig.Process("", &config); err != nil {
+		logger.Fatal("failed to process env config", zap.Error(err))
 	}
 
 	eventHub = &eventhub.EventHub{
@@ -60,7 +62,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		AuditAdapter:        auditAdapter,
 		ConfigMapController: configMgr,
 		InterpolationEngine: interpolation.NewEngine(logger),
-		HopLimit:            hopLimit,
+		HopLimit:            config.HopLimit,
 	}
 
 	cleanup = func() {

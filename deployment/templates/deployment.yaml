@@ -54,4 +54,4 @@ spec:
         - name: LOG_LEVEL
           value: "{{ .Values.logLevel }}"
         - name: HOP_LIMIT
-          value: "{{ .Values.hopLimit}}"
+          value: "{{ .Values.hopLimit | default 2 }}"
