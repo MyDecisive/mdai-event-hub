@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	"github.com/decisiveai/mdai-data-core/interpolation"
+	"github.com/decisiveai/mdai-data-core/kube/kubetest"
 	"github.com/stretchr/testify/require"
 	vkmock "github.com/valkey-io/valkey-go/mock"
 	"go.uber.org/mock/gomock"
@@ -24,37 +26,37 @@ func newMockAdapter() *mockHandlerAdapter {
 	return &mockHandlerAdapter{calls: make(map[string][]map[string]string)}
 }
 
-func (m *mockHandlerAdapter) AddElementToSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
+func (m *mockHandlerAdapter) AddElementToSet(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
 	m.calls["AddElementToSet"] = append(m.calls["AddElementToSet"], map[string]string{
-		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID, "recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (m *mockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey, hubName, value, correlationID string) error {
+func (m *mockHandlerAdapter) RemoveElementFromSet(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
 	m.calls["RemoveElementFromSet"] = append(m.calls["RemoveElementFromSet"], map[string]string{
-		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID, "recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (m *mockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string) error {
+func (m *mockHandlerAdapter) SetMapEntry(_ context.Context, variableKey, hubName, field, value, correlationID string, recursionDepth int) error {
 	m.calls["AddSetMapElement"] = append(m.calls["AddSetMapElement"], map[string]string{
-		"variableKey": variableKey, "hubName": hubName, "field": field, "value": value, "correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "field": field, "value": value, "correlationID": correlationID, "recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (m *mockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string) error {
+func (m *mockHandlerAdapter) RemoveMapEntry(_ context.Context, variableKey, hubName, field, correlationID string, recursionDepth int) error {
 	m.calls["RemoveElementFromMap"] = append(m.calls["RemoveElementFromMap"], map[string]string{
-		"variableKey": variableKey, "hubName": hubName, "field": field, "correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "field": field, "correlationID": correlationID, "recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
 
-func (m *mockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubName, value, correlationID string) error {
+func (m *mockHandlerAdapter) SetStringValue(_ context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
 	m.calls["SetStringValue"] = append(m.calls["SetStringValue"], map[string]string{
-		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID,
+		"variableKey": variableKey, "hubName": hubName, "value": value, "correlationID": correlationID, "recursionDepth": strconv.Itoa(recursionDepth),
 	})
 	return nil
 }
@@ -74,6 +76,9 @@ func newHubWithAdapter(t *testing.T) (*EventHub, *mockHandlerAdapter, *vkmock.Cl
 		AuditAdapter:        audit.NewAuditAdapter(zap.NewNop(), mockClient),
 		InterpolationEngine: interpolation.NewEngine(zap.NewNop()),
 	}
+	cfg := kubetest.NewFakeConfigMapStore()
+	h.ConfigMapController = cfg
+	h.HopLimit = 2
 	return h, ma, mockClient
 }
 
@@ -146,7 +151,7 @@ func TestCmdVarSetAdd_Table(t *testing.T) {
 			require.NoError(t, err)
 
 			requireAdapterCall(t, ma, "AddElementToSet", map[string]string{
-				"variableKey": "myset", "hubName": "hubA", "value": tc.wantValue, "correlationID": "cid-1",
+				"variableKey": "myset", "hubName": "hubA", "value": tc.wantValue, "correlationID": "cid-1", "recursionDepth": "1",
 			})
 			// reset for next run
 			ma.calls = make(map[string][]map[string]string)
@@ -170,7 +175,7 @@ func TestCmdVarMapAdd_Table(t *testing.T) {
 			evPayload: map[string]any{"alert": map[string]any{"name": "HighCPU"}, "instance": "server-123"},
 			inputs:    `{"map":"active_alerts","key":"${trigger:payload.instance}","value":"${trigger:payload.alert.name}"}`,
 			wantCall: map[string]string{
-				"variableKey": "active_alerts", "hubName": "hub-map-test", "field": "server-123", "value": "HighCPU", "correlationID": "cid-map-1",
+				"variableKey": "active_alerts", "hubName": "hub-map-test", "field": "server-123", "value": "HighCPU", "correlationID": "cid-map-1", "recursionDepth": "1",
 			},
 		},
 		{
@@ -236,7 +241,7 @@ func TestCmdVarMapRemove_Table(t *testing.T) {
 			evPayload: map[string]any{"instance": "server-456"},
 			inputs:    `{"map":"stale_alerts","key":"${trigger:payload.instance}"}`,
 			wantCall: map[string]string{
-				"variableKey": "stale_alerts", "hubName": "hub-map-remove-test", "field": "server-456", "correlationID": "cid-map-remove-1",
+				"variableKey": "stale_alerts", "hubName": "hub-map-remove-test", "field": "server-456", "correlationID": "cid-map-remove-1", "recursionDepth": "1",
 			},
 		},
 		{
@@ -283,7 +288,7 @@ func TestCmdVarScalarUpdate_Success_Dispatch(t *testing.T) {
 	require.NoError(t, handler(h, context.Background(), ev, "ns", cmd, nil))
 
 	requireAdapterCall(t, ma, "SetStringValue", map[string]string{
-		"variableKey": "my-scalar", "hubName": "hub-scalar", "value": "v", "correlationID": "cid-scalar-1",
+		"variableKey": "my-scalar", "hubName": "hub-scalar", "value": "v", "correlationID": "cid-scalar-1", "recursionDepth": "1",
 	})
 }
 
@@ -297,8 +302,8 @@ func TestProcessCommandsForEvent_Smoke(t *testing.T) {
 	}
 	require.NoError(t, h.processCommandsForEvent(context.Background(), ev, cmds, "ns", nil, "alerting"))
 
-	requireAdapterCall(t, ma, "AddElementToSet", map[string]string{"variableKey": "s1", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1"})
-	requireAdapterCall(t, ma, "RemoveElementFromSet", map[string]string{"variableKey": "s2", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1"})
+	requireAdapterCall(t, ma, "AddElementToSet", map[string]string{"variableKey": "s1", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1", "recursionDepth": "1"})
+	requireAdapterCall(t, ma, "RemoveElementFromSet", map[string]string{"variableKey": "s2", "hubName": "hub-multi", "value": "foo", "correlationID": "cid-multi-1", "recursionDepth": "1"})
 }
 
 func TestProcessCommandsForEvent_UnsupportedType(t *testing.T) {
@@ -398,8 +403,8 @@ func TestExecVarScalarOp(t *testing.T) {
 			name:            "EmptyValue",
 			evPayloadJSON:   `{"k":"v"}`,
 			cmd:             mkCmd(`{"scalar":"myscalar","value":""}`),
-			wantErrEqual:    opName + ": inputs.value is empty",
-			wantSetOpCalled: false,
+			wantSetOpCalled: true,
+			wantValuePassed: "",
 		},
 		{
 			name:            "MissingFieldInEventPayload_falls_back_to_provided_value",
@@ -432,10 +437,12 @@ func TestExecVarScalarOp(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setOpCalled := false
 			capturedValue := ""
+			capturedRecursionDepth := -1
 
-			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string) error {
+			setOp := func(ctx context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error {
 				setOpCalled = true
 				capturedValue = value
+				capturedRecursionDepth = recursionDepth
 				return tc.setOpReturnErr
 			}
 
@@ -459,8 +466,11 @@ func TestExecVarScalarOp(t *testing.T) {
 			}
 
 			require.Equal(t, tc.wantSetOpCalled, setOpCalled, "setOp call expectation mismatch")
-			if tc.wantSetOpCalled && tc.wantValuePassed != "" {
-				require.Equal(t, tc.wantValuePassed, capturedValue)
+			if tc.wantSetOpCalled {
+				if tc.wantValuePassed != "" {
+					require.Equal(t, tc.wantValuePassed, capturedValue)
+				}
+				require.Equal(t, 1, capturedRecursionDepth, "expected recursion depth to be 1")
 			}
 		})
 	}

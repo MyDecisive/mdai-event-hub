@@ -70,7 +70,7 @@ func (h *EventHub) interpolate(tmpl, opName, what string, event eventing.MdaiEve
 	return value, nil
 }
 
-type setOp func(ctx context.Context, variableKey, hubName, value, correlationID string) error
+type setOp func(ctx context.Context, variableKey, hubName, value, correlationID string, recursionDepth int) error
 
 func (h *EventHub) execVarSetOp(
 	ctx context.Context,
@@ -95,7 +95,7 @@ func (h *EventHub) execVarSetOp(
 		return err
 	}
 
-	return op(ctx, in.Set, ev.HubName, val, ev.CorrelationID)
+	return op(ctx, in.Set, ev.HubName, val, ev.CorrelationID, ev.RecursionDepth+1)
 }
 
 func (h *EventHub) cmdVarSetAdd(
@@ -134,7 +134,7 @@ func (h *EventHub) cmdVarMapAdd(
 		return err
 	}
 
-	return h.VarsAdapter.HandlerAdapter.SetMapEntry(ctx, in.Map, event.HubName, key, val, event.CorrelationID)
+	return h.VarsAdapter.HandlerAdapter.SetMapEntry(ctx, in.Map, event.HubName, key, val, event.CorrelationID, event.RecursionDepth+1)
 }
 
 func (h *EventHub) cmdVarMapRemove(
@@ -154,7 +154,7 @@ func (h *EventHub) cmdVarMapRemove(
 		return err
 	}
 
-	return h.VarsAdapter.HandlerAdapter.RemoveMapEntry(ctx, in.Map, event.HubName, key, event.CorrelationID)
+	return h.VarsAdapter.HandlerAdapter.RemoveMapEntry(ctx, in.Map, event.HubName, key, event.CorrelationID, event.RecursionDepth+1)
 }
 
 func (h *EventHub) cmdVarScalarUpdate(ctx context.Context, ev eventing.MdaiEvent, _ string, cmd rule.Command, _ map[string]any) error {
@@ -172,9 +172,6 @@ func (h *EventHub) execVarScalarOp(
 	if err := DecodeInputs(cmd.Inputs, &in); err != nil {
 		return fmt.Errorf("%s: decode: %w", opName, err)
 	}
-	if in.Value == "" {
-		return fmt.Errorf("%s: inputs.value is empty", opName)
-	}
 	if in.Scalar == "" {
 		return fmt.Errorf("%s: inputs.scalar is empty", opName)
 	}
@@ -184,7 +181,7 @@ func (h *EventHub) execVarScalarOp(
 		return err
 	}
 
-	return op(ctx, in.Scalar, event.HubName, val, event.CorrelationID)
+	return op(ctx, in.Scalar, event.HubName, val, event.CorrelationID, event.RecursionDepth+1)
 }
 
 func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
