@@ -126,3 +126,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.5.0 // indirect
 )
+
+replace github.com/decisiveai/mdai-operator v0.2.3 => ../mdai-operator
+
+replace github.com/decisiveai/mdai-data-core v0.2.7 => ../mdai-data-core

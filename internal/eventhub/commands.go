@@ -25,6 +25,8 @@ var commandDispatch = map[rule.CommandType]cmdHandler{
 	rule.CmdVarMapRemove:    (*EventHub).cmdVarMapRemove,
 
 	rule.CmdWebhookCall: (*EventHub).cmdWebhookCall,
+
+	rule.CmdReplayStart: (*EventHub).cmd,
 }
 
 //nolint:unparam // retained for future contexts (alerting|replay|manual)
@@ -186,6 +188,14 @@ func (h *EventHub) execVarScalarOp(
 
 func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
 	return h.HandleCallWebhookFn(ctx, h.Kube, ns, ev, cmd.Inputs, payload)
+}
+
+func (h *EventHub) cmdReplayStart(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
+	return h.HandleStartReplay(ctx, h.DynamicClient, ns, payload)
+}
+
+func (h *EventHub) cmdReplayEnd(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
+	return h.HandleReplayCompletion(ctx, h.DynamicClient, ns, payload)
 }
 
 func DecodeInputs[T any](raw json.RawMessage, out *T) error {

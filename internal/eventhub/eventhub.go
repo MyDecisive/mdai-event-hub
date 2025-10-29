@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"k8s.io/client-go/dynamic"
 	"runtime/debug"
 	"strings"
 
@@ -22,6 +23,7 @@ type EventHub struct {
 	Logger              *zap.Logger
 	VarsAdapter         VarDeps
 	Kube                kubernetes.Interface
+	DynamicClient       dynamic.Interface
 	AuditAdapter        *audit.AuditAdapter
 	ConfigMapController kube.ConfigMapStore
 	InterpolationEngine *interpolation.Engine
