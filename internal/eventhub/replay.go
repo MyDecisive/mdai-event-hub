@@ -26,14 +26,14 @@ func (h *EventHub) HandleStartReplay(ctx context.Context, kubeClient dynamic.Int
 	return applyErr
 }
 
-func (h *EventHub) HandleReplayCompletion(ctx context.Context, kubeClient dynamic.Interface, payloadData map[string]any) error {
+func (h *EventHub) HandleReplayCompletion(ctx context.Context, kubeClient dynamic.Interface, namespace string, payloadData map[string]any) error {
 	replayName := payloadData["replayName"].(string)
 
 	err := kubeClient.Resource(schema.GroupVersionResource{
 		Group:    "hub.mydecisive.ai",
 		Version:  "v1",
 		Resource: "mdaireplay",
-	}).Delete(ctx, replayName, metav1.DeleteOptions{})
+	}).Namespace(namespace).Delete(ctx, replayName, metav1.DeleteOptions{})
 
 	return err
 }

@@ -26,7 +26,8 @@ var commandDispatch = map[rule.CommandType]cmdHandler{
 
 	rule.CmdWebhookCall: (*EventHub).cmdWebhookCall,
 
-	rule.CmdReplayStart: (*EventHub).cmd,
+	rule.CmdReplayStart: (*EventHub).cmdReplayStart,
+	rule.CmdReplayEnd:   (*EventHub).cmdReplayEnd,
 }
 
 //nolint:unparam // retained for future contexts (alerting|replay|manual)

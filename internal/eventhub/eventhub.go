@@ -59,6 +59,7 @@ const (
 
 	varsEventType     = "vars"
 	alertingEventType = "alerting"
+	replayEventType   = "replay"
 )
 
 // ProcessVariableEvent handles an MdaiEvent for manual variables' workflow.
@@ -112,6 +113,15 @@ func (h *EventHub) ProcessTriggerEvent(ctx context.Context) eventing.HandlerInvo
 	return func(event eventing.MdaiEvent) error {
 		logger := h.withEvent(event, varsEventType)
 		logger.Info("Processing trigger event")
+
+		return h.processMdaiEvent(ctx, event, logger, h.matchedRulesByVariableCtx)
+	}
+}
+
+func (h *EventHub) ProcessReplayEvent(ctx context.Context) eventing.HandlerInvoker {
+	return func(event eventing.MdaiEvent) error {
+		logger := h.withEvent(event, replayEventType)
+		logger.Info("Processing replay event")
 
 		return h.processMdaiEvent(ctx, event, logger, h.matchedRulesByVariableCtx)
 	}
