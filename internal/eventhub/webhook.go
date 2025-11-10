@@ -28,12 +28,12 @@ type SlackPayload struct {
 }
 
 func (h *EventHub) HandleCallWebhookFn(ctx context.Context, kube kubernetes.Interface, namespace string, event eventing.MdaiEvent, raw json.RawMessage, payloadData map[string]any) error {
-	var in mdaiv1.CallWebhookAction
-	if err := DecodeInputs(raw, &in); err != nil {
+	var inputAction mdaiv1.CallWebhookAction
+	if err := DecodeInputs(raw, &inputAction); err != nil {
 		return fmt.Errorf("decode call.webhook: %w", err)
 	}
 
-	webhookURL, err := resolveStringOrFrom(ctx, kube, namespace, in.URL)
+	webhookURL, err := resolveStringOrFrom(ctx, kube, namespace, inputAction.URL)
 	if err != nil {
 		return fmt.Errorf("resolve webhook url: %w", err)
 	}
@@ -47,13 +47,13 @@ func (h *EventHub) HandleCallWebhookFn(ctx context.Context, kube kubernetes.Inte
 
 	callCtx := ctx
 	cancel := func() {}
-	if in.Timeout != nil && in.Timeout.Duration > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, in.Timeout.Duration)
+	if inputAction.Timeout != nil && inputAction.Timeout.Duration > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, inputAction.Timeout.Duration)
 	}
 	defer cancel()
 
 	// resolve template values (from config map or secret plus literals; literals override)
-	templateValues, err := resolveAllTemplateValues(callCtx, kube, namespace, in.TemplateValues, in.TemplateValuesFrom)
+	templateValues, err := resolveAllTemplateValues(callCtx, kube, namespace, inputAction.TemplateValues, inputAction.TemplateValuesFrom)
 	if err != nil {
 		return err
 	}
@@ -61,13 +61,13 @@ func (h *EventHub) HandleCallWebhookFn(ctx context.Context, kube kubernetes.Inte
 	// interpolate template values with event as source before injecting into the payload
 	h.InterpolationEngine.InterpolateMapWithSources(templateValues, &interpolation.TriggerSource{Event: &event})
 
-	body, err := h.buildPayload(callCtx, kube, namespace, in, event, payloadData, templateValues)
+	body, err := h.buildPayload(callCtx, kube, namespace, inputAction, event, payloadData, templateValues)
 	if err != nil {
 		return err
 	}
 
 	// we do not support interpolation for headers
-	headers, err := resolveAllHeaders(callCtx, kube, namespace, in.Headers, in.HeadersFrom)
+	headers, err := resolveAllHeaders(callCtx, kube, namespace, inputAction.Headers, inputAction.HeadersFrom)
 	if err != nil {
 		return err
 	}

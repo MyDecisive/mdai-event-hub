@@ -34,6 +34,11 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("failed to create k8s client", zap.Error(err))
 	}
 
+	dynamicClient, err := dcorekube.NewK8sDynamicClient(logger)
+	if err != nil {
+		logger.Fatal("failed to create k8s dynamic client", zap.Error(err))
+	}
+
 	configMgr, err := dcorekube.NewConfigMapController(dcorekube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
@@ -59,6 +64,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		},
 		Logger:              logger,
 		Kube:                clientset,
+		DynamicClient:       dynamicClient,
 		AuditAdapter:        auditAdapter,
 		ConfigMapController: configMgr,
 		InterpolationEngine: interpolation.NewEngine(logger),

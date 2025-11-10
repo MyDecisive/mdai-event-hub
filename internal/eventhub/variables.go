@@ -70,6 +70,10 @@ func (v *VarDeps) BuildCommandFromEvent(event eventing.MdaiEvent) ([]rule.Comman
 		return buildMapRemoveCommands(cmdType, payloadObj)
 	case rule.CmdWebhookCall:
 		return nil, nil // No commands to build for webhook call in this context
+	case rule.CmdDeployReplay:
+		return nil, nil
+	case rule.CmdCleanUpReplay:
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported command type for manual action: %s", cmdType)
 	}
