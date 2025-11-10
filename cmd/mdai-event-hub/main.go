@@ -48,10 +48,6 @@ func main() {
 		logger.Fatal("Failed to start Trigger event listener", zap.Error(err))
 	}
 
-	if err := eventSubscriber.Subscribe(ctx, eventing.ReplayConsumerGroupName.String(), string(eventing.ReplayEventType), eventhub.WithRecover(logger, eventHub.ProcessReplayEvent(ctx))); err != nil {
-		logger.Fatal("Failed to start Replay event listener", zap.Error(err))
-	}
-
 	<-ctx.Done()
 	logger.Info("Service shutting down")
 }
