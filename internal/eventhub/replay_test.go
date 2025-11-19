@@ -1,9 +1,7 @@
 package eventhub
 
 import (
-	"context"
 	"encoding/json"
-	"k8s.io/utils/ptr"
 	"testing"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
@@ -17,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/utils/ptr"
 )
 
 func TestEventHub_HandleDeployReplay(t *testing.T) {
@@ -54,6 +53,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			namespace: "default",
 			wantErr:   false,
 			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+				t.Helper()
 				assert.Equal(t, "test-replay", obj.GetName())
 				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
 				require.NoError(t, err)
@@ -99,6 +99,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			namespace: "default",
 			wantErr:   false,
 			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+				t.Helper()
 				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
 				require.NoError(t, err)
 				require.True(t, found)
@@ -145,6 +146,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			namespace: "default",
 			wantErr:   false,
 			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+				t.Helper()
 				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
 				require.NoError(t, err)
 				require.True(t, found)
@@ -153,10 +155,10 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, found)
 
-				otlpHttp, found, err := unstructured.NestedMap(destination, "otlpHttp")
+				otlpHTTP, found, err := unstructured.NestedMap(destination, "otlpHttp")
 				require.NoError(t, err)
 				require.True(t, found)
-				assert.Equal(t, "http://otlp-collector:4318", otlpHttp["endpoint"])
+				assert.Equal(t, "http://otlp-collector:4318", otlpHTTP["endpoint"])
 			},
 		},
 		{
@@ -199,6 +201,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			namespace: "secure-ns",
 			wantErr:   false,
 			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+				t.Helper()
 				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
 				require.NoError(t, err)
 				require.True(t, found)
@@ -286,10 +289,9 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			_ = mdaiv1.AddToScheme(scheme)
 
 			dynamicClient := fake.NewSimpleDynamicClient(scheme)
-			h := &EventHub{}
-			ctx := context.Background()
+			ctx := t.Context()
 
-			err := h.HandleDeployReplay(ctx, dynamicClient, tt.namespace, tt.event, tt.command, tt.payloadData)
+			err := HandleDeployReplay(ctx, dynamicClient, tt.namespace, tt.event, tt.command, tt.payloadData)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -303,6 +305,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 
 			// Validate the created resource if validation function is provided
 			if tt.validateReplay != nil {
+				t.Helper()
 				list, err := dynamicClient.Resource(schema.GroupVersionResource{
 					Group:    mdaiv1.GroupVersion.Group,
 					Version:  mdaiv1.GroupVersion.Version,
@@ -400,10 +403,9 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 				dynamicClient = fake.NewSimpleDynamicClient(scheme)
 			}
 
-			h := &EventHub{}
-			ctx := context.Background()
+			ctx := t.Context()
 
-			err := h.HandleReplayCleanUp(ctx, dynamicClient, tt.namespace, tt.payloadData)
+			err := HandleReplayCleanUp(ctx, dynamicClient, tt.namespace, tt.payloadData)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -423,7 +425,7 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 					Resource: "mdaireplays",
 				}).Namespace(tt.namespace).List(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
-				assert.Len(t, list.Items, 0, "replay should have been deleted")
+				assert.Empty(t, list.Items, "replay should have been deleted")
 			}
 		})
 	}
@@ -446,6 +448,7 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 				HubName:       "test-hub",
 			},
 			validate: func(t *testing.T, cr *unstructured.Unstructured) {
+				t.Helper()
 				assert.Equal(t, "test-replay", cr.GetName())
 				assert.Equal(t, "MdaiReplay", cr.GetKind())
 
@@ -468,8 +471,7 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &EventHub{}
-			cr := h.buildReplayCustomResource(tt.replayName, tt.spec)
+			cr := buildReplayCustomResource(tt.replayName, tt.spec)
 
 			require.NotNil(t, cr)
 			tt.validate(t, cr)
@@ -477,7 +479,7 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 	}
 }
 
-// Helper functions
+// Helper functions.
 func mustMarshal(t *testing.T, v any) []byte {
 	t.Helper()
 	data, err := json.Marshal(v)

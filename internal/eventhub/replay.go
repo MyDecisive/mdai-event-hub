@@ -16,13 +16,13 @@ import (
 )
 
 type ReplayScalarUpdatePayloadInputs struct {
-	ReplayName    string                         `json:"replayName"`
-	StartTime     string                         `json:"startTime"`
-	EndTime       string                         `json:"endTime"`
-	TelemetryType mdaiv1.MdaiReplayTelemetryType `json:"telemetryType"`
+	ReplayName    string                         `json:"replayName"`    // nolint:tagliatelle
+	StartTime     string                         `json:"startTime"`     // nolint:tagliatelle
+	EndTime       string                         `json:"endTime"`       // nolint:tagliatelle
+	TelemetryType mdaiv1.MdaiReplayTelemetryType `json:"telemetryType"` // nolint:tagliatelle
 }
 
-func (h *EventHub) HandleDeployReplay(ctx context.Context, dynamicClient dynamic.Interface, namespace string, ev eventing.MdaiEvent, cmd rule.Command, payloadData map[string]any) error {
+func HandleDeployReplay(ctx context.Context, dynamicClient dynamic.Interface, namespace string, ev eventing.MdaiEvent, cmd rule.Command, payloadData map[string]any) error {
 	hubName := ev.HubName
 
 	var replayCmdInputs mdaiv1.DeployReplayAction
@@ -45,7 +45,7 @@ func (h *EventHub) HandleDeployReplay(ctx context.Context, dynamicClient dynamic
 	replaySpec.TelemetryType = replayPayloadInputs.TelemetryType
 	replaySpec.HubName = hubName
 
-	replayCR := h.buildReplayCustomResource(replayPayloadInputs.ReplayName, replaySpec)
+	replayCR := buildReplayCustomResource(replayPayloadInputs.ReplayName, replaySpec)
 
 	_, applyErr := dynamicClient.Resource(schema.GroupVersionResource{
 		Group:    mdaiv1.GroupVersion.Group,
@@ -61,14 +61,14 @@ type ReplayCompletion struct {
 	ReplayStatus string `json:"replay_status"`
 }
 
-func (h *EventHub) HandleReplayCleanUp(ctx context.Context, kubeClient dynamic.Interface, namespace string, payloadData map[string]any) error {
-	completionJson, ok := payloadData["data"].(string)
+func HandleReplayCleanUp(ctx context.Context, kubeClient dynamic.Interface, namespace string, payloadData map[string]any) error {
+	completionJSON, ok := payloadData["data"].(string)
 	if !ok {
 		return errors.New("no data field was found on cleanup event payload")
 	}
 
 	var completionObj ReplayCompletion
-	if err := json.Unmarshal([]byte(completionJson), &completionObj); err != nil {
+	if err := json.Unmarshal([]byte(completionJSON), &completionObj); err != nil {
 		return err
 	}
 
@@ -81,7 +81,7 @@ func (h *EventHub) HandleReplayCleanUp(ctx context.Context, kubeClient dynamic.I
 	return err
 }
 
-func (h *EventHub) buildReplayCustomResource(name string, spec mdaiv1.MdaiReplaySpec) *unstructured.Unstructured {
+func buildReplayCustomResource(name string, spec mdaiv1.MdaiReplaySpec) *unstructured.Unstructured {
 	cr := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": fmt.Sprintf("%s/%s", mdaiv1.GroupVersion.Group, mdaiv1.GroupVersion.Version),
