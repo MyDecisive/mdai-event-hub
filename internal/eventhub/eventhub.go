@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"k8s.io/client-go/dynamic"
 	"runtime/debug"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/decisiveai/mdai-data-core/kube"
 	auditutils "github.com/decisiveai/mdai-event-hub/internal/audit"
 	"go.uber.org/zap"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 

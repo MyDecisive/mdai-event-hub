@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"

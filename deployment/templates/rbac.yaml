@@ -63,5 +63,5 @@ subjects:
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: mdaireplay-editor-role
+  name: mdai-operator-mdaireplay-editor-role
   apiGroup: rbac.authorization.k8s.io
