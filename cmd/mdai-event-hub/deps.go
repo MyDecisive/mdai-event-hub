@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 
 	"github.com/decisiveai/mdai-data-core/audit"
 	datacorepublisher "github.com/decisiveai/mdai-data-core/eventing/publisher"
@@ -10,9 +11,12 @@ import (
 	dcorekube "github.com/decisiveai/mdai-data-core/kube"
 	"github.com/decisiveai/mdai-data-core/valkey"
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const publisherClientName = "publisher-mdai-event-hub"
@@ -34,9 +38,13 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("failed to create k8s client", zap.Error(err))
 	}
 
-	dynamicClient, err := dcorekube.NewK8sDynamicClient(logger)
+	cfg, err := getKubeConfig(logger, os.UserHomeDir)
 	if err != nil {
-		logger.Fatal("failed to create k8s dynamic client", zap.Error(err))
+		logger.Fatal("Failed to get kube config", zap.Error(err))
+	}
+	mdaiClientset, err := mdaiclientset.NewForConfig(cfg)
+	if err != nil {
+		logger.Fatal("Failed to create mdai clientset", zap.Error(err))
 	}
 
 	configMgr, err := dcorekube.NewConfigMapController(dcorekube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
@@ -44,7 +52,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}
 	if confMgrRunErr := configMgr.Run(); confMgrRunErr != nil {
-		logger.Fatal("failed to run  ConfigMap manager", zap.Error(confMgrRunErr))
+		logger.Fatal("failed to run ConfigMap manager", zap.Error(confMgrRunErr))
 	}
 
 	publisher, err := datacorepublisher.NewPublisher(ctx, logger, publisherClientName)
@@ -64,7 +72,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		},
 		Logger:              logger,
 		Kube:                clientset,
-		DynamicClient:       dynamicClient,
+		MdaiClientset:       mdaiClientset,
 		AuditAdapter:        auditAdapter,
 		ConfigMapController: configMgr,
 		InterpolationEngine: interpolation.NewEngine(logger),
@@ -79,4 +87,26 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 	}
 
 	return eventHub, cleanup
+}
+
+type HomeDirGetterFunc func() (string, error)
+
+func getKubeConfig(logger *zap.Logger, homeDirGetterFunc HomeDirGetterFunc) (*rest.Config, error) {
+	config, inClusterErr := rest.InClusterConfig()
+	if inClusterErr != nil {
+		// Try fetching config from the default file location
+		homeDir, homeDirErr := homeDirGetterFunc()
+		if homeDirErr != nil {
+			logger.Error("Failed to load home directory for loading k8s config", zap.Error(homeDirErr))
+			return nil, homeDirErr
+		}
+
+		fileConfig, kubeConfigFromFileErr := clientcmd.BuildConfigFromFlags("", homeDir+"/.kube/config")
+		if kubeConfigFromFileErr != nil {
+			logger.Error("Failed to build k8s config", zap.Error(kubeConfigFromFileErr))
+			return nil, kubeConfigFromFileErr
+		}
+		config = fileConfig
+	}
+	return config, nil
 }

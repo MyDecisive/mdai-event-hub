@@ -7,14 +7,11 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
+	mdaifake "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/fake"
+	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/fake"
 	"k8s.io/utils/ptr"
 )
 
@@ -27,7 +24,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 		namespace      string
 		wantErr        bool
 		errContains    string
-		validateReplay func(t *testing.T, obj *unstructured.Unstructured)
+		validateReplay func(t *testing.T, obj mdaiv1.MdaiReplay)
 	}{
 		{
 			name: "successful replay deployment with basic config",
@@ -52,18 +49,16 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			},
 			namespace: "default",
 			wantErr:   false,
-			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+			validateReplay: func(t *testing.T, obj mdaiv1.MdaiReplay) {
 				t.Helper()
 				assert.Equal(t, "test-replay", obj.GetName())
-				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "2024-01-01T00:00:00Z", spec["startTime"])
-				assert.Equal(t, "2024-01-02T00:00:00Z", spec["endTime"])
-				assert.Equal(t, string(mdaiv1.MetricsReplayTelemetryType), spec["telemetryType"])
-				assert.Equal(t, "test-hub", spec["hubName"])
-				assert.Equal(t, "http://opamp.example.com", spec["opampEndpoint"])
-				assert.Equal(t, "replay-status-var", spec["statusVariableRef"])
+				spec := obj.Spec
+				assert.Equal(t, "2024-01-01T00:00:00Z", spec.StartTime)
+				assert.Equal(t, "2024-01-02T00:00:00Z", spec.EndTime)
+				assert.Equal(t, mdaiv1.MetricsReplayTelemetryType, spec.TelemetryType)
+				assert.Equal(t, "test-hub", spec.HubName)
+				assert.Equal(t, "http://opamp.example.com", spec.OpAMPEndpoint)
+				assert.Equal(t, "replay-status-var", spec.StatusVariableRef)
 			},
 		},
 		{
@@ -98,23 +93,16 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			},
 			namespace: "default",
 			wantErr:   false,
-			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+			validateReplay: func(t *testing.T, obj mdaiv1.MdaiReplay) {
 				t.Helper()
-				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
-				require.NoError(t, err)
-				require.True(t, found)
+				spec := obj.Spec
+				source := spec.Source
+				s3 := source.S3
 
-				source, found, err := unstructured.NestedMap(spec, "source")
-				require.NoError(t, err)
-				require.True(t, found)
-
-				s3, found, err := unstructured.NestedMap(source, "s3")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "us-east-1", s3["s3Region"])
-				assert.Equal(t, "telemetry-data", s3["s3Bucket"])
-				assert.Equal(t, "metrics/", s3["filePrefix"])
-				assert.Equal(t, string(mdaiv1.S3ReplayHourPartition), s3["s3Partition"])
+				assert.Equal(t, "us-east-1", s3.S3Region)
+				assert.Equal(t, "telemetry-data", s3.S3Bucket)
+				assert.Equal(t, "metrics/", s3.FilePrefix)
+				assert.Equal(t, mdaiv1.S3ReplayHourPartition, s3.S3Partition)
 			},
 		},
 		{
@@ -145,20 +133,12 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			},
 			namespace: "default",
 			wantErr:   false,
-			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+			validateReplay: func(t *testing.T, obj mdaiv1.MdaiReplay) {
 				t.Helper()
-				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
-				require.NoError(t, err)
-				require.True(t, found)
-
-				destination, found, err := unstructured.NestedMap(spec, "destination")
-				require.NoError(t, err)
-				require.True(t, found)
-
-				otlpHTTP, found, err := unstructured.NestedMap(destination, "otlpHttp")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "http://otlp-collector:4318", otlpHTTP["endpoint"])
+				spec := obj.Spec
+				destination := spec.Destination
+				otlpHTTP := destination.OtlpHttp
+				assert.Equal(t, "http://otlp-collector:4318", otlpHTTP.Endpoint)
 			},
 		},
 		{
@@ -200,27 +180,18 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			},
 			namespace: "secure-ns",
 			wantErr:   false,
-			validateReplay: func(t *testing.T, obj *unstructured.Unstructured) {
+			validateReplay: func(t *testing.T, obj mdaiv1.MdaiReplay) {
 				t.Helper()
-				spec, found, err := unstructured.NestedMap(obj.Object, "spec")
-				require.NoError(t, err)
-				require.True(t, found)
+				spec := obj.Spec
 
-				assert.Equal(t, true, spec["ignoreSendingQueue"])
+				assert.Equal(t, true, spec.IgnoreSendingQueue)
 
-				resource, found, err := unstructured.NestedMap(spec, "resource")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "custom-replay-image:v1.2.3", resource["image"])
+				resource := spec.Resource
+				assert.Equal(t, "custom-replay-image:v1.2.3", resource.Image)
 
-				source, found, err := unstructured.NestedMap(spec, "source")
-				require.NoError(t, err)
-				require.True(t, found)
-
-				aws, found, err := unstructured.NestedMap(source, "aws")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "aws-creds-secret", aws["awsAccessKeySecret"])
+				source := spec.Source
+				aws := source.AWSConfig
+				assert.Equal(t, ptr.To("aws-creds-secret"), aws.AWSAccessKeySecret)
 			},
 		},
 		{
@@ -285,14 +256,11 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheme := runtime.NewScheme()
-			_ = mdaiv1.AddToScheme(scheme)
-
-			dynamicClient := fake.NewSimpleDynamicClient(scheme)
 			ctx := t.Context()
+			var clientset mdaiclientset.HubV1Interface
+			clientset = mdaifake.NewSimpleClientset().HubV1()
 
-			err := HandleDeployReplay(ctx, dynamicClient, tt.namespace, tt.event, tt.command, tt.payloadData)
-
+			err := HandleDeployReplay(ctx, clientset, tt.namespace, tt.event, tt.command, tt.payloadData)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errContains != "" {
@@ -306,14 +274,11 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 			// Validate the created resource if validation function is provided
 			if tt.validateReplay != nil {
 				t.Helper()
-				list, err := dynamicClient.Resource(schema.GroupVersionResource{
-					Group:    mdaiv1.GroupVersion.Group,
-					Version:  mdaiv1.GroupVersion.Version,
-					Resource: "mdaireplays",
-				}).Namespace(tt.namespace).List(ctx, metav1.ListOptions{})
+				list, err := clientset.MdaiReplays(tt.namespace).List(ctx, metav1.ListOptions{})
+
 				require.NoError(t, err)
 				require.Len(t, list.Items, 1)
-				tt.validateReplay(t, &list.Items[0])
+				tt.validateReplay(t, list.Items[0])
 			}
 		})
 	}
@@ -324,7 +289,7 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 		name         string
 		payloadData  map[string]any
 		namespace    string
-		setupReplay  *unstructured.Unstructured
+		setupReplay  *mdaiv1.MdaiReplay
 		wantErr      bool
 		errContains  string
 		shouldDelete bool
@@ -338,16 +303,16 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 				}),
 			},
 			namespace: "default",
-			setupReplay: &unstructured.Unstructured{
-				Object: map[string]any{
-					"apiVersion": "mdai.decisiveai.com/v1",
-					"kind":       "MdaiReplay",
-					"metadata": map[string]any{
-						"name":      "test-replay",
-						"namespace": "default",
-					},
-					"spec": map[string]any{},
+			setupReplay: &mdaiv1.MdaiReplay{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "MdaiReplay",
+					APIVersion: "hub.decisiveai.com/v1",
 				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-replay",
+					Namespace: "default",
+				},
+				Spec: mdaiv1.MdaiReplaySpec{},
 			},
 			wantErr:      false,
 			shouldDelete: true,
@@ -393,19 +358,15 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheme := runtime.NewScheme()
-			_ = mdaiv1.AddToScheme(scheme)
-
-			var dynamicClient dynamic.Interface
-			if tt.setupReplay != nil {
-				dynamicClient = fake.NewSimpleDynamicClient(scheme, tt.setupReplay)
-			} else {
-				dynamicClient = fake.NewSimpleDynamicClient(scheme)
-			}
+			var clientset mdaiclientset.HubV1Interface
+			clientset = mdaifake.NewSimpleClientset().HubV1()
 
 			ctx := t.Context()
+			if tt.setupReplay != nil {
+				clientset.MdaiReplays(tt.namespace).Create(ctx, tt.setupReplay, metav1.CreateOptions{})
+			}
 
-			err := HandleReplayCleanUp(ctx, dynamicClient, tt.namespace, tt.payloadData)
+			err := HandleReplayCleanUp(ctx, clientset, tt.namespace, tt.payloadData)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -419,11 +380,7 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 
 			// Verify the replay was deleted if expected
 			if tt.shouldDelete {
-				list, err := dynamicClient.Resource(schema.GroupVersionResource{
-					Group:    mdaiv1.GroupVersion.Group,
-					Version:  mdaiv1.GroupVersion.Version,
-					Resource: "mdaireplays",
-				}).Namespace(tt.namespace).List(ctx, metav1.ListOptions{})
+				list, err := clientset.MdaiReplays(tt.namespace).List(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				assert.Empty(t, list.Items, "replay should have been deleted")
 			}
@@ -436,7 +393,7 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 		name       string
 		replayName string
 		spec       mdaiv1.MdaiReplaySpec
-		validate   func(t *testing.T, cr *unstructured.Unstructured)
+		validate   func(t *testing.T, replay *mdaiv1.MdaiReplay)
 	}{
 		{
 			name:       "basic replay resource",
@@ -447,24 +404,20 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 				TelemetryType: "metrics",
 				HubName:       "test-hub",
 			},
-			validate: func(t *testing.T, cr *unstructured.Unstructured) {
+			validate: func(t *testing.T, cr *mdaiv1.MdaiReplay) {
 				t.Helper()
 				assert.Equal(t, "test-replay", cr.GetName())
-				assert.Equal(t, "MdaiReplay", cr.GetKind())
+				assert.Equal(t, "MdaiReplay", cr.Kind)
 
-				apiVersion, found, err := unstructured.NestedString(cr.Object, "apiVersion")
-				require.NoError(t, err)
-				require.True(t, found)
+				apiVersion := cr.APIVersion
 				assert.Contains(t, apiVersion, mdaiv1.GroupVersion.Group)
 				assert.Contains(t, apiVersion, mdaiv1.GroupVersion.Version)
 
-				spec, found, err := unstructured.NestedMap(cr.Object, "spec")
-				require.NoError(t, err)
-				require.True(t, found)
-				assert.Equal(t, "2024-01-01T00:00:00Z", spec["startTime"])
-				assert.Equal(t, "2024-01-02T00:00:00Z", spec["endTime"])
-				assert.Equal(t, "metrics", spec["telemetryType"])
-				assert.Equal(t, "test-hub", spec["hubName"])
+				spec := cr.Spec
+				assert.Equal(t, "2024-01-01T00:00:00Z", spec.StartTime)
+				assert.Equal(t, "2024-01-02T00:00:00Z", spec.EndTime)
+				assert.Equal(t, mdaiv1.MdaiReplayTelemetryType("metrics"), spec.TelemetryType)
+				assert.Equal(t, "test-hub", spec.HubName)
 			},
 		},
 	}
@@ -474,7 +427,7 @@ func TestEventHub_buildReplayCustomResource(t *testing.T) {
 			cr := buildReplayCustomResource(tt.replayName, tt.spec)
 
 			require.NotNil(t, cr)
-			tt.validate(t, cr)
+			tt.validate(t, &cr)
 		})
 	}
 }

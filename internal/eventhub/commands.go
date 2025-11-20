@@ -192,11 +192,14 @@ func (h *EventHub) cmdWebhookCall(ctx context.Context, ev eventing.MdaiEvent, ns
 }
 
 func (h *EventHub) cmdDeployReplay(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
-	return HandleDeployReplay(ctx, h.DynamicClient, ns, ev, cmd, payload)
+	// return HandleDeployReplay(ctx, h.DynamicClient, ns, ev, cmd, payload)
+	return HandleDeployReplay(ctx, h.MdaiClientset, ns, ev, cmd, payload)
 }
 
 func (h *EventHub) cmdCleanUpReplay(ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error {
-	return HandleReplayCleanUp(ctx, h.DynamicClient, ns, payload)
+	// return HandleReplayCleanUp(ctx, h.DynamicClient, ns, payload)
+	return HandleReplayCleanUp(ctx, h.MdaiClientset, ns, payload)
+
 }
 
 func DecodeInputs[T any](raw json.RawMessage, out *T) error {

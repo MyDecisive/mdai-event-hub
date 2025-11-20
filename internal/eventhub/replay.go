@@ -4,15 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/decisiveai/mdai-data-core/eventing"
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
+	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 type ReplayScalarUpdatePayloadInputs struct {
@@ -22,7 +19,7 @@ type ReplayScalarUpdatePayloadInputs struct {
 	TelemetryType mdaiv1.MdaiReplayTelemetryType `json:"telemetryType"` // nolint:tagliatelle
 }
 
-func HandleDeployReplay(ctx context.Context, dynamicClient dynamic.Interface, namespace string, ev eventing.MdaiEvent, cmd rule.Command, payloadData map[string]any) error {
+func HandleDeployReplay(ctx context.Context, clientset mdaiclientset.HubV1Interface, namespace string, ev eventing.MdaiEvent, cmd rule.Command, payloadData map[string]any) error {
 	hubName := ev.HubName
 
 	var replayCmdInputs mdaiv1.DeployReplayAction
@@ -46,12 +43,7 @@ func HandleDeployReplay(ctx context.Context, dynamicClient dynamic.Interface, na
 	replaySpec.HubName = hubName
 
 	replayCR := buildReplayCustomResource(replayPayloadInputs.ReplayName, replaySpec)
-
-	_, applyErr := dynamicClient.Resource(schema.GroupVersionResource{
-		Group:    mdaiv1.GroupVersion.Group,
-		Version:  mdaiv1.GroupVersion.Version,
-		Resource: "mdaireplays",
-	}).Namespace(namespace).Create(ctx, replayCR, metav1.CreateOptions{})
+	_, applyErr := clientset.MdaiReplays(namespace).Create(ctx, &replayCR, metav1.CreateOptions{})
 
 	return applyErr
 }
@@ -61,7 +53,7 @@ type ReplayCompletion struct {
 	ReplayStatus string `json:"replay_status"`
 }
 
-func HandleReplayCleanUp(ctx context.Context, kubeClient dynamic.Interface, namespace string, payloadData map[string]any) error {
+func HandleReplayCleanUp(ctx context.Context, clientset mdaiclientset.HubV1Interface, namespace string, payloadData map[string]any) error {
 	completionJSON, ok := payloadData["data"].(string)
 	if !ok {
 		return errors.New("no data field was found on cleanup event payload")
@@ -72,24 +64,18 @@ func HandleReplayCleanUp(ctx context.Context, kubeClient dynamic.Interface, name
 		return err
 	}
 
-	err := kubeClient.Resource(schema.GroupVersionResource{
-		Group:    mdaiv1.GroupVersion.Group,
-		Version:  mdaiv1.GroupVersion.Version,
-		Resource: "mdaireplays",
-	}).Namespace(namespace).Delete(ctx, completionObj.ReplayName, metav1.DeleteOptions{})
-
-	return err
+	return clientset.MdaiReplays(namespace).Delete(ctx, completionObj.ReplayName, metav1.DeleteOptions{})
 }
 
-func buildReplayCustomResource(name string, spec mdaiv1.MdaiReplaySpec) *unstructured.Unstructured {
-	cr := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": fmt.Sprintf("%s/%s", mdaiv1.GroupVersion.Group, mdaiv1.GroupVersion.Version),
-			"kind":       "MdaiReplay",
-			"metadata": map[string]any{
-				"name": name,
-			},
-			"spec": spec,
+func buildReplayCustomResource(name string, spec mdaiv1.MdaiReplaySpec) mdaiv1.MdaiReplay {
+	cr := mdaiv1.MdaiReplay{
+		Spec: spec,
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "MdaiReplay",
+			APIVersion: mdaiv1.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
 		},
 	}
 	return cr
