@@ -14,6 +14,10 @@ deployment:
   name: mdai-event-hub
   replicas: 3
   containerPort: 8082
+  tolerations: []
+  nodeSelector: {}
+  affinity: {}
+  annotations: {}
 image:
   repository: public.ecr.aws/p3k6k6h3/mdai-event-hub
   # tag: 0.0.1
