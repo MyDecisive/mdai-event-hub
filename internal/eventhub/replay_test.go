@@ -8,7 +8,6 @@ import (
 	"github.com/decisiveai/mdai-data-core/eventing/rule"
 	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
 	mdaifake "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/fake"
-	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -184,7 +183,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 				t.Helper()
 				spec := obj.Spec
 
-				assert.Equal(t, true, spec.IgnoreSendingQueue)
+				assert.True(t, spec.IgnoreSendingQueue)
 
 				resource := spec.Resource
 				assert.Equal(t, "custom-replay-image:v1.2.3", resource.Image)
@@ -257,8 +256,7 @@ func TestEventHub_HandleDeployReplay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			var clientset mdaiclientset.HubV1Interface
-			clientset = mdaifake.NewSimpleClientset().HubV1()
+			clientset := mdaifake.NewSimpleClientset().HubV1()
 
 			err := HandleDeployReplay(ctx, clientset, tt.namespace, tt.event, tt.command, tt.payloadData)
 			if tt.wantErr {
@@ -358,12 +356,12 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var clientset mdaiclientset.HubV1Interface
-			clientset = mdaifake.NewSimpleClientset().HubV1()
+			clientset := mdaifake.NewSimpleClientset().HubV1()
 
 			ctx := t.Context()
 			if tt.setupReplay != nil {
-				clientset.MdaiReplays(tt.namespace).Create(ctx, tt.setupReplay, metav1.CreateOptions{})
+				_, err := clientset.MdaiReplays(tt.namespace).Create(ctx, tt.setupReplay, metav1.CreateOptions{})
+				require.NoError(t, err)
 			}
 
 			err := HandleReplayCleanUp(ctx, clientset, tt.namespace, tt.payloadData)
