@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -393,8 +394,6 @@ func resolveAllTemplateValues(ctx context.Context, kube kubernetes.Interface, ns
 			return nil, fmt.Errorf("templateValuesFrom[%s]: no source", k)
 		}
 	}
-	for k, v := range vals {
-		out[k] = v
-	}
+	maps.Copy(out, vals)
 	return out, nil
 }
