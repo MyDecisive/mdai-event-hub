@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/decisiveai/mdai-data-core v0.2.9
-	github.com/decisiveai/mdai-operator v0.2.7
+	github.com/decisiveai/mdai-operator v0.2.9
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/stretchr/testify v1.11.1
 	github.com/valkey-io/valkey-go v1.0.62
@@ -126,7 +126,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/decisiveai/mdai-operator v0.2.3 => github.com/decisiveai/mdai-operator v0.2.5-0.20251120051418-71d18954facd
-
-replace github.com/decisiveai/mdai-data-core v0.2.7 => ../mdai-data-core

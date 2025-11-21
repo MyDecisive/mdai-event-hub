@@ -45,8 +45,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/decisiveai/mdai-data-core v0.2.9 h1:dFveDVpOTWRgI0W6I4kxQ9qjrXgYUX+d9nTukhmj82E=
 github.com/decisiveai/mdai-data-core v0.2.9/go.mod h1:t79Oo87yO6pZ8bp5WKZMnzvi6Y/65EDsT9dlj0v+RgY=
-github.com/decisiveai/mdai-operator v0.2.5-0.20251120051418-71d18954facd h1:MBikUmlwq3q43yzs+8EoK2+6JcymatqFxPe6UqMCjy8=
-github.com/decisiveai/mdai-operator v0.2.5-0.20251120051418-71d18954facd/go.mod h1:T1FcWpwFdlaH+xLUl/y7m3jaPVsPyRgSHSNmPtD+TSE=
+github.com/decisiveai/mdai-operator v0.2.9 h1:Pfg7EgP/zmJ6FE5+hdK00DdD7KGNd6ZJdL7+eYt6R08=
+github.com/decisiveai/mdai-operator v0.2.9/go.mod h1:LUyfV5Vp38JjhU39uwcTU8NKqFvVzC9Vw5o+cA3ud08=
 github.com/deckarep/golang-set/v2 v2.8.0 h1:swm0rlPCmdWn9mESxKOjWk8hXSqoxOp+ZlfuyaAdFlQ=
 github.com/deckarep/golang-set/v2 v2.8.0/go.mod h1:VAky9rY/yGXJOLEDv3OMci+7wtDpOF4IN+y82NBOac4=
 github.com/digitalocean/godo v1.132.0 h1:n0x6+ZkwbyQBtIU1wwBhv26EINqHg0wWQiBXlwYg/HQ=
