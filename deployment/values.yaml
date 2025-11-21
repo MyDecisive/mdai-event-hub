@@ -10,7 +10,6 @@ serviceAccount:
   name: "mdai-event-hub"
 
 deployment:
-  namespace: mdai
   name: mdai-event-hub
   replicas: 3
   containerPort: 8082
@@ -23,7 +22,6 @@ image:
   # tag: 0.0.1
 
 service:
-  namespace: mdai
   name: mdai-event-hub
   port: 8082
   targetPort: 8082
