@@ -2,6 +2,12 @@ DOCKER_TAG ?= 0.1.8
 CHART_VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
 REPO_NAME := $(shell basename -s .git `git config --get remote.origin.url`)
 
+include .toolenv
+export $(shell sed 's/=.*//' .toolenv)
+
+TOOL_BIN_DIR := .bin
+GCL_BIN := $(TOOL_BIN_DIR)/golangci-lint
+
 docker-login docker-build docker-push: AWS_ECR_REPO := public.ecr.aws/p3k6k6h3
 docker-build docker-push: DOCKER_IMAGE := $(AWS_ECR_REPO)/$(REPO_NAME):$(DOCKER_TAG)
 
@@ -80,3 +86,30 @@ helm-publish: helm-package
 		rm -rf $(CLONE_DIR)
 
 	@echo "✅ Chart published"
+
+.PHONY: tool-clean
+tool-clean:
+	@rm -rf .bin
+
+.PHONY: lint
+lint: golangci-lint
+	@.bin/golangci-lint run --allow-parallel-runners --allow-serial-runners
+
+.PHONY: golangci-lint
+golangci-lint:
+	@mkdir -p $(TOOL_BIN_DIR)
+	@if [ -x "$(GCL_BIN)" ]; then \
+		INSTALLED_VERSION=$$($(GCL_BIN) version | awk '{print $$4}'); \
+		if [ "$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ]; then \
+			echo "golangci-lint v$(GOLANGCI_LINT_VERSION) already installed"; \
+			exit 0; \
+		else \
+			echo "golangci-lint version mismatch (installed: $$INSTALLED_VERSION, expected: v$(GOLANGCI_LINT_VERSION)); reinstalling..."; \
+		fi \
+	else \
+		echo "golangci-lint not found; installing v$(GOLANGCI_LINT_VERSION)..."; \
+	fi; \
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | \
+	sh -s -- -b $(TOOL_BIN_DIR) v$(GOLANGCI_LINT_VERSION); \
+	echo "Installed golangci-lint v$(GOLANGCI_LINT_VERSION)"
+

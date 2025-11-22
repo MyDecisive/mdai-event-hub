@@ -1,6 +1,22 @@
 version: "2"
 run:
-  allow-parallel-runners: true
+#  allow-parallel-runners: true
+#  allow-serial-runners: true
+  skip-dirs:
+    - vendor
+    - .git
+    - .github
+    - .idea
+    - .vscode
+    - bin
+    - build
+    - dist
+    - out
+    - tools
+    - scripts
+    - hack
+    - deployment
+    - mocks
 linters:
   default: all
   disable:
