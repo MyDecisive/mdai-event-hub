@@ -91,6 +91,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 
 type HomeDirGetterFunc func() (string, error)
 
+// TODO: Refactor this and above type to live in data core and use Data Core's exported version of them (ENG-930).
 func getKubeConfig(logger *zap.Logger, homeDirGetterFunc HomeDirGetterFunc) (*rest.Config, error) {
 	config, inClusterErr := rest.InClusterConfig()
 	if inClusterErr != nil {
