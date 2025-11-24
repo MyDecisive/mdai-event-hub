@@ -31,3 +31,6 @@ vendor/
 .idea
 /mdai-event-hub
 mdai-event-hub-*.tgz
+
+.DS_Store
+**/.DS_Store

@@ -14,6 +14,7 @@ import (
 	"github.com/decisiveai/mdai-data-core/interpolation"
 	"github.com/decisiveai/mdai-data-core/kube"
 	auditutils "github.com/decisiveai/mdai-event-hub/internal/audit"
+	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 )
@@ -22,6 +23,7 @@ type EventHub struct {
 	Logger              *zap.Logger
 	VarsAdapter         VarDeps
 	Kube                kubernetes.Interface
+	MdaiClientset       mdaiclientset.HubV1Interface
 	AuditAdapter        *audit.AuditAdapter
 	ConfigMapController kube.ConfigMapStore
 	InterpolationEngine *interpolation.Engine
