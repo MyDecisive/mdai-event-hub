@@ -104,7 +104,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 	eventHub = &eventhub.EventHub{
 		VarsAdapter: eventhub.VarDeps{
 			Logger:         logger,
-			HandlerAdapter: corehandlers.NewHandlerAdapter(valkeyClient, logger, publisher, opampConnectionManager),
+			HandlerAdapter: corehandlers.NewHandlerAdapter(valkeyClient, logger, publisher),
 		},
 		Logger:                 logger,
 		Kube:                   clientset,
