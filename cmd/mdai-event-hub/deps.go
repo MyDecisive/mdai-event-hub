@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"github.com/decisiveai/mdai-data-core/opamp"
+	"github.com/open-telemetry/opamp-go/protobufs"
+	"github.com/open-telemetry/opamp-go/server/types"
+	"net/http"
 	"os"
 
 	"github.com/decisiveai/mdai-data-core/audit"
@@ -13,6 +17,7 @@ import (
 	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
 	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"github.com/kelseyhightower/envconfig"
+	opampserver "github.com/open-telemetry/opamp-go/server"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
@@ -65,18 +70,50 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("failed to process env config", zap.Error(err))
 	}
 
+	opampServer := opampserver.New(opamp.NewLoggerFromZap(logger, "opamp-server"))
+	opampConnectionManager := opamp.NewAgentConnectionManager()
+
+	settings := opampserver.StartSettings{
+		Settings: opampserver.Settings{
+			Callbacks: types.Callbacks{
+				OnConnecting: func(request *http.Request) types.ConnectionResponse {
+					return types.ConnectionResponse{
+						Accept: true,
+						ConnectionCallbacks: types.ConnectionCallbacks{
+							OnMessage: func(ctx context.Context, conn types.Connection, message *protobufs.AgentToServer) *protobufs.ServerToAgent {
+								opampConnectionManager.AddConnection(conn, string(message.GetInstanceUid()))
+								// TODO: handle message from agent
+								return &protobufs.ServerToAgent{
+									InstanceUid: message.GetInstanceUid(),
+								}
+							},
+							OnConnectionClose: func(conn types.Connection) {
+								opampConnectionManager.RemoveConnection(conn)
+							},
+						},
+					}
+				},
+			},
+		},
+	}
+
+	if err = opampServer.Start(settings); err != nil {
+		logger.Fatal("failed to start opamp server", zap.Error(err))
+	}
+
 	eventHub = &eventhub.EventHub{
 		VarsAdapter: eventhub.VarDeps{
 			Logger:         logger,
-			HandlerAdapter: corehandlers.NewHandlerAdapter(valkeyClient, logger, publisher),
+			HandlerAdapter: corehandlers.NewHandlerAdapter(valkeyClient, logger, publisher, opampConnectionManager),
 		},
-		Logger:              logger,
-		Kube:                clientset,
-		MdaiClientset:       mdaiClientset,
-		AuditAdapter:        auditAdapter,
-		ConfigMapController: configMgr,
-		InterpolationEngine: interpolation.NewEngine(logger),
-		HopLimit:            config.HopLimit,
+		Logger:                 logger,
+		Kube:                   clientset,
+		MdaiClientset:          mdaiClientset,
+		AuditAdapter:           auditAdapter,
+		ConfigMapController:    configMgr,
+		InterpolationEngine:    interpolation.NewEngine(logger),
+		AgentConnectionManager: opampConnectionManager,
+		HopLimit:               config.HopLimit,
 	}
 
 	cleanup = func() {

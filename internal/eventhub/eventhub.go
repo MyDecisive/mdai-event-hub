@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/decisiveai/mdai-data-core/opamp"
 	"runtime/debug"
 	"strings"
 
@@ -20,14 +21,15 @@ import (
 )
 
 type EventHub struct {
-	Logger              *zap.Logger
-	VarsAdapter         VarDeps
-	Kube                kubernetes.Interface
-	MdaiClientset       mdaiclientset.HubV1Interface
-	AuditAdapter        *audit.AuditAdapter
-	ConfigMapController kube.ConfigMapStore
-	InterpolationEngine *interpolation.Engine
-	HopLimit            int
+	Logger                 *zap.Logger
+	VarsAdapter            VarDeps
+	Kube                   kubernetes.Interface
+	MdaiClientset          mdaiclientset.HubV1Interface
+	AuditAdapter           *audit.AuditAdapter
+	ConfigMapController    kube.ConfigMapStore
+	InterpolationEngine    *interpolation.Engine
+	AgentConnectionManager opamp.ConnectionManager
+	HopLimit               int
 }
 
 func WithRecover(log *zap.Logger, next eventing.HandlerInvoker) eventing.HandlerInvoker {
@@ -151,6 +153,7 @@ func (h *EventHub) processMdaiEvent(ctx context.Context, event eventing.MdaiEven
 	for _, r := range rules {
 		clog := h.withEvent(event, alertingEventType).With(zap.String(fldRule, r.Name))
 		clog.Info("Processing rule")
+		// TODO: potentially move the dispatch restart call after this loop so it's called once for each set of rules being processed.
 		err := h.processCommandsForEvent(ctx, event, r.Commands, automationConfig.Namespace, payloadData, alertingEventType)
 		success := err == nil
 		if auditErr := auditutils.RecordAuditEventFromMdaiEvent(ctx, h.Logger, h.AuditAdapter, event, &r, success); auditErr != nil {

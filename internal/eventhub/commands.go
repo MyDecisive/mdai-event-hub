@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	mapset "github.com/deckarep/golang-set/v2"
 	"strings"
 	"time"
 
@@ -17,18 +18,28 @@ import (
 type cmdHandler func(h *EventHub, ctx context.Context, ev eventing.MdaiEvent, ns string, cmd rule.Command, payload map[string]any) error
 
 //nolint:gochecknoglobals
-var commandDispatch = map[rule.CommandType]cmdHandler{
-	rule.CmdVarSetAdd:       (*EventHub).cmdVarSetAdd,
-	rule.CmdVarSetRemove:    (*EventHub).cmdVarSetRemove,
-	rule.CmdVarScalarUpdate: (*EventHub).cmdVarScalarUpdate,
-	rule.CmdVarMapAdd:       (*EventHub).cmdVarMapAdd,
-	rule.CmdVarMapRemove:    (*EventHub).cmdVarMapRemove,
+var (
+	commandDispatch = map[rule.CommandType]cmdHandler{
+		rule.CmdVarSetAdd:       (*EventHub).cmdVarSetAdd,
+		rule.CmdVarSetRemove:    (*EventHub).cmdVarSetRemove,
+		rule.CmdVarScalarUpdate: (*EventHub).cmdVarScalarUpdate,
+		rule.CmdVarMapAdd:       (*EventHub).cmdVarMapAdd,
+		rule.CmdVarMapRemove:    (*EventHub).cmdVarMapRemove,
 
-	rule.CmdWebhookCall: (*EventHub).cmdWebhookCall,
+		rule.CmdWebhookCall: (*EventHub).cmdWebhookCall,
 
-	rule.CmdDeployReplay:  (*EventHub).cmdDeployReplay,
-	rule.CmdCleanUpReplay: (*EventHub).cmdCleanUpReplay,
-}
+		rule.CmdDeployReplay:  (*EventHub).cmdDeployReplay,
+		rule.CmdCleanUpReplay: (*EventHub).cmdCleanUpReplay,
+	}
+
+	commandsNeedingRestart = mapset.NewThreadUnsafeSet[rule.CommandType](
+		rule.CmdVarSetAdd,
+		rule.CmdVarSetRemove,
+		rule.CmdVarScalarUpdate,
+		rule.CmdVarMapAdd,
+		rule.CmdVarMapRemove,
+	)
+)
 
 //nolint:unparam // retained for future contexts (alerting|replay|manual)
 func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.MdaiEvent, commands []rule.Command, namespace string, payloadData map[string]any, eventType string) error {
@@ -53,6 +64,13 @@ func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.M
 			return fmt.Errorf("command %d (%s) failed: %w", i, cmd.Type, err)
 		}
 		clog.Debug("command processed", zap.Duration("elapsed", time.Since(start)))
+
+		// dispatch restart commands to collector agents
+		if commandsNeedingRestart.Contains(cmd.Type) {
+			if err := h.AgentConnectionManager.DispatchRestartCommand(ctx); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

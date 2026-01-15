@@ -43,8 +43,8 @@ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSs
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/decisiveai/mdai-data-core v0.2.9 h1:dFveDVpOTWRgI0W6I4kxQ9qjrXgYUX+d9nTukhmj82E=
-github.com/decisiveai/mdai-data-core v0.2.9/go.mod h1:t79Oo87yO6pZ8bp5WKZMnzvi6Y/65EDsT9dlj0v+RgY=
+github.com/decisiveai/mdai-data-core v0.2.10-0.20260115193028-b0cc7848230a h1:1nYIRbbxu7j0+HiOLA5naeS8bAg+2R11ys4v71I3JTk=
+github.com/decisiveai/mdai-data-core v0.2.10-0.20260115193028-b0cc7848230a/go.mod h1:o40VxhMGPOVuIQZw8MPH3Zv//OIvMGa1n/0nlz6Rt88=
 github.com/decisiveai/mdai-operator v0.2.9 h1:Pfg7EgP/zmJ6FE5+hdK00DdD7KGNd6ZJdL7+eYt6R08=
 github.com/decisiveai/mdai-operator v0.2.9/go.mod h1:LUyfV5Vp38JjhU39uwcTU8NKqFvVzC9Vw5o+cA3ud08=
 github.com/deckarep/golang-set/v2 v2.8.0 h1:swm0rlPCmdWn9mESxKOjWk8hXSqoxOp+ZlfuyaAdFlQ=
@@ -232,6 +232,8 @@ github.com/onsi/ginkgo/v2 v2.23.4 h1:ktYTpKJAVZnDT4VjxSbiBenUjmlL/5QkBEocaWXiQus
 github.com/onsi/ginkgo/v2 v2.23.4/go.mod h1:Bt66ApGPBFzHyR+JO10Zbt0Gsp4uWxu5mIOTusL46e8=
 github.com/onsi/gomega v1.37.0 h1:CdEG8g0S133B4OswTDC/5XPSzE1OeP29QOioj2PID2Y=
 github.com/onsi/gomega v1.37.0/go.mod h1:8D9+Txp43QWKhM24yyOBEdpkzN8FvJyAwecBgsU4KU0=
+github.com/open-telemetry/opamp-go v0.22.0 h1:7UnsQgFFS7ffM09JQk+9aGVBAAlsLfcooZ9xvSYwxWM=
+github.com/open-telemetry/opamp-go v0.22.0/go.mod h1:339N71soCPrhHywbAcKUZJDODod581ZOxCpTkrl3zYQ=
 github.com/open-telemetry/opentelemetry-operator v0.131.0 h1:UTZZG8jh51q5Dzd70JZWN/6s9cY+dLomhSzoV2bQeLo=
 github.com/open-telemetry/opentelemetry-operator v0.131.0/go.mod h1:D4Z+Ed4NJ3Vcxt2z3XZETbeWQGLzJN8h79KslqF5A5k=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
