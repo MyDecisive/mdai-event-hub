@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"github.com/decisiveai/mdai-data-core/opamp"
+	"github.com/google/uuid"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"github.com/open-telemetry/opamp-go/server/types"
 	"net/http"
@@ -74,13 +75,25 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 	opampConnectionManager := opamp.NewAgentConnectionManager()
 
 	settings := opampserver.StartSettings{
+		ListenEndpoint: "127.0.0.1:4320",
 		Settings: opampserver.Settings{
 			Callbacks: types.Callbacks{
 				OnConnecting: func(request *http.Request) types.ConnectionResponse {
 					return types.ConnectionResponse{
 						Accept: true,
 						ConnectionCallbacks: types.ConnectionCallbacks{
+							OnConnected: func(ctx context.Context, conn types.Connection) {
+								// TODO: switch to debug
+								logger.Info("Connected to Opamp Agent (collector)")
+							},
 							OnMessage: func(ctx context.Context, conn types.Connection, message *protobufs.AgentToServer) *protobufs.ServerToAgent {
+								// TODO: switch to debug
+								instanceID, uuidErr := uuid.FromBytes(message.GetInstanceUid())
+								if uuidErr != nil {
+									logger.Warn("Failed to parse instance uuid", zap.Error(uuidErr))
+								}
+								logger.Info("Message from collector agent", zap.String("ID", instanceID.String()))
+
 								opampConnectionManager.AddConnection(conn, string(message.GetInstanceUid()))
 								// TODO: handle message from agent
 								return &protobufs.ServerToAgent{
@@ -88,6 +101,8 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 								}
 							},
 							OnConnectionClose: func(conn types.Connection) {
+								// TODO: switch to debug
+								logger.Info("Disconnected from Opamp Server")
 								opampConnectionManager.RemoveConnection(conn)
 							},
 						},
@@ -100,6 +115,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 	if err = opampServer.Start(settings); err != nil {
 		logger.Fatal("failed to start opamp server", zap.Error(err))
 	}
+	logger.Info("opamp server started")
 
 	eventHub = &eventhub.EventHub{
 		VarsAdapter: eventhub.VarDeps{
@@ -120,6 +136,9 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Info("Closing client connections...")
 		configMgr.Stop()
 		valkeyClient.Close()
+		if err = opampServer.Stop(ctx); err != nil {
+			logger.Error("failed to stop opamp server", zap.Error(err))
+		}
 		logger.Info("Cleanup complete.")
 	}
 

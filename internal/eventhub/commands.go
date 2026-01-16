@@ -67,6 +67,8 @@ func (h *EventHub) processCommandsForEvent(ctx context.Context, event eventing.M
 
 		// dispatch restart commands to collector agents
 		if commandsNeedingRestart.Contains(cmd.Type) {
+			// TODO: switch to debug
+			clog.Info("dispatching restart command", zap.String("command", cmd.Type.String()))
 			if err := h.AgentConnectionManager.DispatchRestartCommand(ctx); err != nil {
 				return err
 			}
