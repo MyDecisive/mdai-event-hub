@@ -75,7 +75,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 	opampConnectionManager := opamp.NewAgentConnectionManager()
 
 	settings := opampserver.StartSettings{
-		ListenEndpoint: "127.0.0.1:4320",
+		ListenEndpoint: "0.0.0.0:4320",
 		Settings: opampserver.Settings{
 			Callbacks: types.Callbacks{
 				OnConnecting: func(request *http.Request) types.ConnectionResponse {

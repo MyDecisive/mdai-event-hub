@@ -7,7 +7,13 @@ spec:
   selector:
     app: {{ .Values.service.name }}
   ports:
-  - protocol: TCP
-    port: {{ .Values.service.port }}
-    targetPort: {{ .Values.service.targetPort }}
+    - name: {{ .Values.service.name }}
+      protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+    - name: {{ .Values.opamp.name }}
+      protocol: TCP
+      port: {{ .Values.opamp.port }}
+      targetPort: {{ .Values.opamp.targetPort }}
+
   type: {{ .Values.service.type }}

@@ -13,6 +13,7 @@ deployment:
   name: mdai-event-hub
   replicas: 3
   containerPort: 8082
+  opampPort: 4320
   tolerations: []
   nodeSelector: {}
   affinity: {}
@@ -26,3 +27,8 @@ service:
   port: 8082
   targetPort: 8082
   type: ClusterIP
+
+opamp:
+  name: mdai-event-hub-opamp
+  port: 4320
+  targetPort: 4320
