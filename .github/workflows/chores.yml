@@ -52,11 +52,30 @@ jobs:
         run: |
           make tidy-check
 
+      - name: Extract golangci-lint version
+        id: extract_golangci_lint_version
+        shell: bash
+        run: |
+          if [ ! -f .toolenv ]; then
+            echo "::error file=.toolenv,title=MISSING::❌ CRITICAL: .toolenv file not found."
+            exit 1
+          fi
+          set -a
+          source .toolenv
+          set +a
+          if [ -z "${GOLANGCI_LINT_VERSION:-}" ]; then
+            echo "::error file=.toolenv,title=GOLANGCI_LINT_VERSION-MISSING::❌ CRITICAL: .toolenv is missing a value for GOLANGCI_LINT_VERSION."
+            echo "Please ensure .toolenv is present and GOLANGCI_LINT_VERSION is set."
+            exit 1
+          fi
+          echo "ℹ️ Using golangci-lint version v${GOLANGCI_LINT_VERSION}"
+          echo "golangci_version=v${GOLANGCI_LINT_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Run linter
         uses: golangci/golangci-lint-action@v8
         with:
           install-mode: "binary"
-          version: "latest"
+          version: ${{ steps.extract_golangci_lint_version.outputs.golangci_version }}
 
       - name: Running Tests
         run: |
