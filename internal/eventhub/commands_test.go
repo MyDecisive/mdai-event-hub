@@ -406,7 +406,7 @@ func TestExecVarScalarOp(t *testing.T) {
 			wantSetOpCalled: true,
 			wantValuePassed: "",
 		},
-		{
+		{ //nolint:gosec // G101 false positive: test fixture contains a placeholder string, not credentials.
 			name:            "MissingFieldInEventPayload_falls_back_to_provided_value",
 			evPayloadJSON:   `{"k":"v"}`,
 			cmd:             mkCmd(`{"scalar":"myscalar","value":"${trigger:payload.missing}"}`),
