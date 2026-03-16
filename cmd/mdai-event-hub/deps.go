@@ -4,15 +4,15 @@ import (
 	"context"
 	"os"
 
-	"github.com/decisiveai/mdai-data-core/audit"
-	datacorepublisher "github.com/decisiveai/mdai-data-core/eventing/publisher"
-	corehandlers "github.com/decisiveai/mdai-data-core/handlers"
-	"github.com/decisiveai/mdai-data-core/interpolation"
-	dcorekube "github.com/decisiveai/mdai-data-core/kube"
-	"github.com/decisiveai/mdai-data-core/valkey"
-	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
-	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"github.com/kelseyhightower/envconfig"
+	"github.com/mydecisive/mdai-data-core/audit"
+	datacorepublisher "github.com/mydecisive/mdai-data-core/eventing/publisher"
+	corehandlers "github.com/mydecisive/mdai-data-core/handlers"
+	"github.com/mydecisive/mdai-data-core/interpolation"
+	dcorekube "github.com/mydecisive/mdai-data-core/kube"
+	"github.com/mydecisive/mdai-data-core/valkey"
+	"github.com/mydecisive/mdai-event-hub/internal/eventhub"
+	mdaiclientset "github.com/mydecisive/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
@@ -47,7 +47,7 @@ func initDependencies(ctx context.Context, logger *zap.Logger) (eventHub *eventh
 		logger.Fatal("Failed to create mdai clientset", zap.Error(err))
 	}
 
-	configMgr, err := dcorekube.NewConfigMapController(dcorekube.AutomationConfigMapType, corev1.NamespaceAll, clientset, logger)
+	configMgr, err := dcorekube.NewConfigMapController([]string{dcorekube.AutomationConfigMapType}, corev1.NamespaceAll, clientset, logger)
 	if err != nil {
 		logger.Fatal("Failed to create ConfigMap manager", zap.Error(err))
 	}

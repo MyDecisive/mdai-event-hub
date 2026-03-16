@@ -13,9 +13,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/decisiveai/mdai-data-core/eventing"
-	"github.com/decisiveai/mdai-data-core/interpolation"
-	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
+	"github.com/mydecisive/mdai-data-core/eventing"
+	"github.com/mydecisive/mdai-data-core/interpolation"
+	mdaiv1 "github.com/mydecisive/mdai-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
