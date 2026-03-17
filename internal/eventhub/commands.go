@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/decisiveai/mdai-data-core/eventing"
-	"github.com/decisiveai/mdai-data-core/eventing/rule"
-	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
+	"github.com/mydecisive/mdai-data-core/eventing"
+	"github.com/mydecisive/mdai-data-core/eventing/rule"
+	mdaiv1 "github.com/mydecisive/mdai-operator/api/v1"
 	"go.uber.org/zap"
 )
 

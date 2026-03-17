@@ -6,14 +6,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/decisiveai/mdai-data-core/eventing"
-	"github.com/decisiveai/mdai-data-core/eventing/subscriber"
-	"github.com/decisiveai/mdai-data-core/service"
-	"github.com/decisiveai/mdai-event-hub/internal/eventhub"
+	"github.com/mydecisive/mdai-data-core/eventing"
+	"github.com/mydecisive/mdai-data-core/eventing/subscriber"
+	"github.com/mydecisive/mdai-data-core/service"
+	"github.com/mydecisive/mdai-event-hub/internal/eventhub"
 	"go.uber.org/zap"
 )
 
-const serviceName = "github.com/decisiveai/mdai-event-hub"
+const serviceName = "github.com/mydecisive/mdai-event-hub"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

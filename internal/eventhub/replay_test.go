@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/decisiveai/mdai-data-core/eventing"
-	"github.com/decisiveai/mdai-data-core/eventing/rule"
-	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
-	mdaifake "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/fake"
+	"github.com/mydecisive/mdai-data-core/eventing"
+	"github.com/mydecisive/mdai-data-core/eventing/rule"
+	mdaiv1 "github.com/mydecisive/mdai-operator/api/v1"
+	mdaifake "github.com/mydecisive/mdai-operator/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -304,7 +304,7 @@ func TestEventHub_HandleReplayCleanUp(t *testing.T) {
 			setupReplay: &mdaiv1.MdaiReplay{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "MdaiReplay",
-					APIVersion: "hub.decisiveai.com/v1",
+					APIVersion: "hub.mydecisive.ai/v1",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-replay",

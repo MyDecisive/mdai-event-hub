@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/decisiveai/mdai-data-core/eventing"
-	"github.com/decisiveai/mdai-data-core/eventing/rule"
-	mdaiv1 "github.com/decisiveai/mdai-operator/api/v1"
-	mdaiclientset "github.com/decisiveai/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
+	"github.com/mydecisive/mdai-data-core/eventing"
+	"github.com/mydecisive/mdai-data-core/eventing/rule"
+	mdaiv1 "github.com/mydecisive/mdai-operator/api/v1"
+	mdaiclientset "github.com/mydecisive/mdai-operator/pkg/generated/clientset/versioned/typed/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
